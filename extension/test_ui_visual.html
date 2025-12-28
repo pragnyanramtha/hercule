@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>UI Visual Test - Privacy Policy Analyzer</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            padding: 20px;
+            background: #f3f4f6;
+        }
+        .test-container {
+            max-width: 400px;
+            margin: 20px auto;
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .popup-frame {
+            width: 400px;
+            height: 600px;
+            border: 2px solid #333;
+            margin: 20px auto;
+            overflow-y: auto;
+            background: #f9fafb;
+        }
+    </style>
+</head>
+<body>
+    <h1 class="text-3xl font-bold text-center mb-8">Privacy Policy Analyzer - UI Visual Tests</h1>
+    
+    <!-- Test 1: Traffic Light - Green -->
+    <div class="test-container">
+        <h2 class="text-xl font-bold mb-4">Test 1: Traffic Light - Green (Score 85)</h2>
+        <div class="flex items-center gap-4">
+            <div class="w-16 h-16 rounded-full bg-green-500 shadow-lg flex items-center justify-center">
+                <span class="text-white font-bold text-xl">85</span>
+            </div>
+            <div class="flex flex-col">
+                <span class="text-3xl font-bold text-green-700">85</span>
+                <span class="text-sm text-gray-600">out of 100</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Test 2: Traffic Light - Yellow -->
+    <div class="test-container">
+        <h2 class="text-xl font-bold mb-4">Test 2: Traffic Light - Yellow (Score 65)</h2>
+        <div class="flex items-center gap-4">
+            <div class="w-16 h-16 rounded-full bg-yellow-400 shadow-lg flex items-center justify-center">
+                <span class="text-white font-bold text-xl">65</span>
+            </div>
+            <div class="flex flex-col">
+                <span class="text-3xl font-bold text-yellow-700">65</span>
+                <span class="text-sm text-gray-600">out of 100</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Test 3: Traffic Light - Red -->
+    <div class="test-container">
+        <h2 class="text-xl font-bold mb-4">Test 3: Traffic Light - Red (Score 35)</h2>
+        <div class="flex items-center gap-4">
+            <div class="w-16 h-16 rounded-full bg-red-500 shadow-lg flex items-center justify-center">
+                <span class="text-white font-bold text-xl">35</span>
+            </div>
+            <div class="flex flex-col">
+                <span class="text-3xl font-bold text-red-700">35</span>
+                <span class="text-sm text-gray-600">out of 100</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Test 4: Summary with Read More -->
+    <div class="test-container">
+        <h2 class="text-xl font-bold mb-4">Test 4: Summary Section</h2>
+        <div class="bg-white rounded-lg p-4 shadow">
+            <h3 class="text-lg font-semibold mb-2 text-gray-800">Summary</h3>
+            <p class="text-gray-700 text-sm leading-relaxed whitespace-pre-wrap">
+This privacy policy is relatively user-friendly and transparent. It clearly outlines data collection practices, provides users with control over their information, and demonstrates respect for privacy rights. The policy uses accessible language and offers straightforward options for data management.
+            </p>
+            <button class="mt-3 text-blue-600 hover:text-blue-800 text-sm font-medium focus:outline-none focus:underline">
+                Read More
+            </button>
+        </div>
+    </div>
+
+    <!-- Test 5: Red Flags with Items -->
+    <div class="test-container">
+        <h2 class="text-xl font-bold mb-4">Test 5: Red Flags Section</h2>
+        <div class="bg-red-50 border border-red-200 rounded-lg p-4 shadow">
+            <h3 class="text-lg font-semibold mb-3 text-red-700">Red Flags</h3>
+            <ul class="space-y-2">
+                <li class="flex items-start gap-2 text-sm text-gray-800">
+                    <span class="text-orange-500 flex-shrink-0 mt-0.5">⚠️</span>
+                    <span class="leading-relaxed">Extensive third-party data sharing mentioned</span>
+                </li>
+                <li class="flex items-start gap-2 text-sm text-gray-800">
+                    <span class="text-orange-500 flex-shrink-0 mt-0.5">⚠️</span>
+                    <span class="leading-relaxed">Data may be retained indefinitely</span>
+                </li>
+                <li class="flex items-start gap-2 text-sm text-gray-800">
+                    <span class="text-orange-500 flex-shrink-0 mt-0.5">⚠️</span>
+                    <span class="leading-relaxed">Mandatory arbitration clause limits legal options</span>
+                </li>
+            </ul>
+            <button class="mt-3 text-red-600 hover:text-red-800 text-sm font-medium focus:outline-none focus:underline">
+                Show More (2 more)
+            </button>
+        </div>
+    </div>
+
+    <!-- Test 6: Red Flags - No Concerns -->
+    <div class="test-container">
+        <h2 class="text-xl font-bold mb-4">Test 6: Red Flags - No Concerns</h2>
+        <div class="bg-green-50 border border-green-200 rounded-lg p-4 shadow">
+            <h3 class="text-lg font-semibold mb-2 text-green-700">Red Flags</h3>
+            <p class="text-green-600 text-sm">
+                ✓ No major concerns identified
+            </p>
+        </div>
+    </div>
+
+    <!-- Test 7: Action Items with Links -->
+    <div class="test-container">
+        <h2 class="text-xl font-bold mb-4">Test 7: Action Items with Links</h2>
+        <div class="bg-blue-50 border border-blue-200 rounded-lg p-4 shadow">
+            <h3 class="text-lg font-semibold mb-3 text-blue-700">Action Items</h3>
+            <ul class="space-y-2">
+                <li class="flex items-start gap-2 text-sm text-gray-800">
+                    <span class="text-blue-500 flex-shrink-0 mt-0.5">→</span>
+                    <a href="#" target="_blank" rel="noopener noreferrer" 
+                       class="text-blue-600 hover:text-blue-800 hover:underline leading-relaxed">
+                        Review privacy settings and limit data sharing where possible
+                    </a>
+                </li>
+                <li class="flex items-start gap-2 text-sm text-gray-800">
+                    <span class="text-blue-500 flex-shrink-0 mt-0.5">→</span>
+                    <a href="#" target="_blank" rel="noopener noreferrer" 
+                       class="text-blue-600 hover:text-blue-800 hover:underline leading-relaxed">
+                        Look for opt-out options in your account settings
+                    </a>
+                </li>
+                <li class="flex items-start gap-2 text-sm text-gray-800">
+                    <span class="text-blue-500 flex-shrink-0 mt-0.5">→</span>
+                    <span class="leading-relaxed">Exercise your right to delete your data if you no longer use the service</span>
+                </li>
+            </ul>
+        </div>
+    </div>
+
+    <!-- Test 8: Action Items - No Items -->
+    <div class="test-container">
+        <h2 class="text-xl font-bold mb-4">Test 8: Action Items - Policy Acceptable</h2>
+        <div class="bg-blue-50 border border-blue-200 rounded-lg p-4 shadow">
+            <h3 class="text-lg font-semibold mb-2 text-blue-700">Action Items</h3>
+            <p class="text-blue-600 text-sm">
+                ✓ Policy appears acceptable
+            </p>
+        </div>
+    </div>
+
+    <!-- Test 9: Full Popup Layout -->
+    <div class="test-container" style="max-width: 450px;">
+        <h2 class="text-xl font-bold mb-4">Test 9: Full Popup Layout (400x600)</h2>
+        <div class="popup-frame">
+            <div class="w-full h-full p-4 bg-gray-50">
+                <h1 class="text-2xl font-bold text-blue-600 mb-4">
+                    Privacy Policy Analyzer
+                </h1>
+
+                <div class="space-y-4">
+                    <!-- Traffic Light Score -->
+                    <div class="bg-white rounded-lg p-6 shadow">
+                        <div class="flex items-center gap-4">
+                            <div class="w-16 h-16 rounded-full bg-yellow-400 shadow-lg flex items-center justify-center">
+                                <span class="text-white font-bold text-xl">65</span>
+                            </div>
+                            <div class="flex flex-col">
+                                <span class="text-3xl font-bold text-yellow-700">65</span>
+                                <span class="text-sm text-gray-600">out of 100</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Summary Section -->
+                    <div class="bg-white rounded-lg p-4 shadow">
+                        <h2 class="text-lg font-semibold mb-2 text-gray-800">Summary</h2>
+                        <p class="text-gray-700 text-sm leading-relaxed whitespace-pre-wrap">
+This privacy policy has moderate clarity with some areas of concern. While it outlines basic data practices, there are aspects that could be more transparent. Users should be aware of third-party data sharing and review the specific terms that apply to their usage.
+                        </p>
+                    </div>
+
+                    <!-- Red Flags Section -->
+                    <div class="bg-red-50 border border-red-200 rounded-lg p-4 shadow">
+                        <h2 class="text-lg font-semibold mb-3 text-red-700">Red Flags</h2>
+                        <ul class="space-y-2">
+                            <li class="flex items-start gap-2 text-sm text-gray-800">
+                                <span class="text-orange-500 flex-shrink-0 mt-0.5">⚠️</span>
+                                <span class="leading-relaxed">Extensive third-party data sharing mentioned</span>
+                            </li>
+                            <li class="flex items-start gap-2 text-sm text-gray-800">
+                                <span class="text-orange-500 flex-shrink-0 mt-0.5">⚠️</span>
+                                <span class="leading-relaxed">Data may be retained indefinitely</span>
+                            </li>
+                        </ul>
+                    </div>
+
+                    <!-- Action Items Section -->
+                    <div class="bg-blue-50 border border-blue-200 rounded-lg p-4 shadow">
+                        <h2 class="text-lg font-semibold mb-3 text-blue-700">Action Items</h2>
+                        <ul class="space-y-2">
+                            <li class="flex items-start gap-2 text-sm text-gray-800">
+                                <span class="text-blue-500 flex-shrink-0 mt-0.5">→</span>
+                                <a href="#" target="_blank" rel="noopener noreferrer" 
+                                   class="text-blue-600 hover:text-blue-800 hover:underline leading-relaxed">
+                                    Review privacy settings and limit data sharing
+                                </a>
+                            </li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Test 10: Loading State -->
+    <div class="test-container">
+        <h2 class="text-xl font-bold mb-4">Test 10: Loading State</h2>
+        <div class="flex flex-col items-center justify-center py-8">
+            <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mb-4"></div>
+            <p class="text-gray-600">Analyzing policy...</p>
+        </div>
+    </div>
+
+    <!-- Test 11: Error State -->
+    <div class="test-container">
+        <h2 class="text-xl font-bold mb-4">Test 11: Error State</h2>
+        <div class="bg-red-50 border border-red-200 rounded-lg p-4">
+            <p class="text-red-800 font-medium">Error</p>
+            <p class="text-red-600 text-sm mt-1">Could not analyze policy. Check backend is running.</p>
+            <button class="mt-3 px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 text-sm">
+                Retry
+            </button>
+        </div>
+    </div>
+
+    <div class="text-center mt-8 mb-4">
+        <p class="text-gray-600">All UI components rendered successfully ✓</p>
+        <p class="text-sm text-gray-500 mt-2">Open this file in a browser to verify visual styling</p>
+    </div>
+</body>
+</html>
