@@ -1,0 +1,38 @@
+# Node modules
+node_modules/
+
+# Python virtual environment
+venv/
+env/
+.venv/
+.env/
+
+# Build outputs
+dist/
+build/
+
+# Environment variables
+.env
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.kiro/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Cache files
+cache.json
+
+# Logs
+*.log
