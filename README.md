@@ -206,6 +206,8 @@ This project was created for the Microsoft Imagine Cup. Contributions are welcom
 
 ## License
 
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
 ## Support
 
 For issues and questions, please open an issue on GitHub.
