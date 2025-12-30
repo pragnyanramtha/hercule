@@ -1,136 +1,236 @@
-"""Simple test to verify backend functionality."""
-import sys
+"""
+Backend tests using pytest with fixtures.
+Run with: pytest test_backend.py -v
+"""
+import pytest
 import hashlib
-from pathlib import Path
 from datetime import datetime, timezone
+from unittest.mock import patch, MagicMock
 
-# Test 1: Verify cache key generation is deterministic
-def test_cache_key_generation():
-    """Test that hash generation is deterministic."""
-    text1 = "This is a test privacy policy"
-    text2 = "This is a test privacy policy"
-    text3 = "This is a DIFFERENT privacy policy"
+from models import AnalysisResult, ActionItem
+from cache import CacheManager, cache_manager
+
+
+# ============== Fixtures ==============
+
+@pytest.fixture
+def sample_policy_text():
+    """Sample privacy policy text for testing."""
+    return "This is a sample privacy policy that collects your data and shares it with third parties."
+
+
+@pytest.fixture
+def sample_action_item():
+    """Sample ActionItem for testing."""
+    return ActionItem(
+        text="Review privacy settings",
+        url="https://example.com/settings",
+        priority="high"
+    )
+
+
+@pytest.fixture
+def sample_analysis_result(sample_action_item):
+    """Sample AnalysisResult for testing."""
+    return AnalysisResult(
+        score=75,
+        summary="This is a test summary",
+        red_flags=["Test flag 1", "Test flag 2"],
+        user_action_items=[sample_action_item],
+        timestamp=datetime.now(timezone.utc),
+        url="https://example.com/privacy"
+    )
+
+
+@pytest.fixture
+def isolated_cache(tmp_path):
+    """Create an isolated cache for testing."""
+    # Patch the cache file path
+    cache_file = tmp_path / "test_cache.json"
+    with patch('cache.CACHE_FILE', cache_file):
+        # Reset singleton for fresh instance
+        CacheManager._instance = None
+        manager = CacheManager()
+        yield manager
+        CacheManager._instance = None
+
+
+# ============== Cache Key Tests ==============
+
+class TestCacheKeyGeneration:
+    """Tests for cache key generation."""
     
-    # Generate hashes
-    hash1 = hashlib.sha256(text1.strip().lower().encode('utf-8')).hexdigest()
-    hash2 = hashlib.sha256(text2.strip().lower().encode('utf-8')).hexdigest()
-    hash3 = hashlib.sha256(text3.strip().lower().encode('utf-8')).hexdigest()
+    def test_deterministic_hash(self, sample_policy_text):
+        """Same text should produce same hash."""
+        hash1 = cache_manager.generate_key(sample_policy_text)
+        hash2 = cache_manager.generate_key(sample_policy_text)
+        assert hash1 == hash2
     
-    # Same text should produce same hash
-    assert hash1 == hash2, "Same text should produce same hash"
+    def test_different_text_different_hash(self):
+        """Different text should produce different hash."""
+        hash1 = cache_manager.generate_key("Policy A")
+        hash2 = cache_manager.generate_key("Policy B")
+        assert hash1 != hash2
     
-    # Different text should produce different hash
-    assert hash1 != hash3, "Different text should produce different hash"
+    def test_case_insensitive(self):
+        """Hash should be case-insensitive."""
+        hash1 = cache_manager.generate_key("Privacy Policy")
+        hash2 = cache_manager.generate_key("PRIVACY POLICY")
+        assert hash1 == hash2
     
-    print("✓ Cache key generation test passed")
-    return True
+    def test_whitespace_normalized(self):
+        """Hash should normalize whitespace."""
+        hash1 = cache_manager.generate_key("  Privacy Policy  ")
+        hash2 = cache_manager.generate_key("Privacy Policy")
+        assert hash1 == hash2
+    
+    def test_hash_length(self, sample_policy_text):
+        """SHA-256 hash should be 64 hex characters."""
+        hash_key = cache_manager.generate_key(sample_policy_text)
+        assert len(hash_key) == 64
+        assert all(c in '0123456789abcdef' for c in hash_key)
 
 
-# Test 2: Verify imports work
-def test_imports():
-    """Test that all required modules can be imported."""
-    try:
-        # Import models first (no dependencies)
-        from models import AnalysisResult, ActionItem
+# ============== Model Tests ==============
+
+class TestModels:
+    """Tests for Pydantic models."""
+    
+    def test_action_item_creation(self, sample_action_item):
+        """ActionItem should be created with valid data."""
+        assert sample_action_item.text == "Review privacy settings"
+        assert sample_action_item.url == "https://example.com/settings"
+        assert sample_action_item.priority == "high"
+    
+    def test_action_item_optional_url(self):
+        """ActionItem url should be optional."""
+        item = ActionItem(text="Test", priority="low")
+        assert item.url is None
+    
+    def test_action_item_invalid_priority(self):
+        """ActionItem should reject invalid priority."""
+        with pytest.raises(ValueError):
+            ActionItem(text="Test", priority="invalid")
+    
+    def test_analysis_result_creation(self, sample_analysis_result):
+        """AnalysisResult should be created with valid data."""
+        assert sample_analysis_result.score == 75
+        assert len(sample_analysis_result.red_flags) == 2
+        assert len(sample_analysis_result.user_action_items) == 1
+    
+    def test_analysis_result_score_bounds(self, sample_action_item):
+        """AnalysisResult score should be 0-100."""
+        with pytest.raises(ValueError):
+            AnalysisResult(
+                score=101,
+                summary="Test",
+                red_flags=[],
+                user_action_items=[],
+                timestamp=datetime.now(timezone.utc),
+                url=""
+            )
         
-        # Import service_llm (requires env vars but we won't instantiate)
-        import service_llm
-        
-        # Import main functions (but not the module-level LLM service)
-        import importlib.util
-        spec = importlib.util.spec_from_file_location("main_module", "main.py")
-        
-        print("✓ All imports successful")
-        return True
-    except ImportError as e:
-        print(f"✗ Import failed: {e}")
-        return False
+        with pytest.raises(ValueError):
+            AnalysisResult(
+                score=-1,
+                summary="Test",
+                red_flags=[],
+                user_action_items=[],
+                timestamp=datetime.now(timezone.utc),
+                url=""
+            )
 
 
-# Test 3: Verify cache key function matches expected behavior
-def test_cache_key_function():
-    """Test the actual cache key generation function."""
-    try:
-        # Import just the function we need
-        import hashlib
-        
-        def generate_cache_key(policy_text: str) -> str:
-            normalized = policy_text.strip().lower()
-            return hashlib.sha256(normalized.encode('utf-8')).hexdigest()
-        
-        text = "Sample Privacy Policy"
-        key1 = generate_cache_key(text)
-        key2 = generate_cache_key(text)
-        
-        assert key1 == key2, "Cache key should be deterministic"
-        assert len(key1) == 64, "SHA-256 hash should be 64 hex characters"
-        
-        print("✓ Cache key function test passed")
-        return True
-    except Exception as e:
-        print(f"✗ Cache key function test failed: {e}")
-        return False
+# ============== API Endpoint Tests ==============
+
+class TestAPIEndpoints:
+    """Tests for FastAPI endpoints."""
+    
+    @pytest.fixture
+    def client(self):
+        """Create test client."""
+        from fastapi.testclient import TestClient
+        from main import app
+        with TestClient(app) as client:
+            yield client
+    
+    def test_health_endpoint(self, client):
+        """Health endpoint should return status."""
+        response = client.get("/health")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "healthy"
+        assert "timestamp" in data
+        assert "cache_size" in data
+    
+    def test_analyze_empty_text(self, client):
+        """Analyze should reject empty policy text."""
+        response = client.post("/analyze", json={
+            "policy_text": "",
+            "url": "https://example.com"
+        })
+        assert response.status_code == 422  # Validation error
+    
+    def test_analyze_whitespace_only(self, client):
+        """Analyze should reject whitespace-only policy text."""
+        response = client.post("/analyze", json={
+            "policy_text": "   \n\t  ",
+            "url": "https://example.com"
+        })
+        assert response.status_code == 422  # Validation error
+    
+    def test_analyze_valid_request(self, client, sample_policy_text):
+        """Analyze should process valid policy text."""
+        response = client.post("/analyze", json={
+            "policy_text": sample_policy_text,
+            "url": "https://example.com/privacy"
+        })
+        assert response.status_code == 200
+        data = response.json()
+        assert "score" in data
+        assert "summary" in data
+        assert "red_flags" in data
+        assert "user_action_items" in data
+    
+    def test_analyze_missing_url(self, client, sample_policy_text):
+        """Analyze should work without URL."""
+        response = client.post("/analyze", json={
+            "policy_text": sample_policy_text
+        })
+        assert response.status_code == 200
 
 
-# Test 4: Verify models can be instantiated
-def test_models():
-    """Test that Pydantic models work correctly."""
-    try:
-        from models import AnalysisResult, ActionItem
-        from datetime import datetime
+# ============== LLM Service Tests ==============
+
+class TestLLMService:
+    """Tests for LLM service."""
+    
+    def test_mock_analysis_generation(self, sample_policy_text):
+        """Mock analysis should generate valid result."""
+        from service_llm import LLMService
+        service = LLMService()
         
-        # Create action item
-        action = ActionItem(
-            text="Review privacy settings",
-            url="https://example.com/settings",
-            priority="high"
-        )
+        # Force test mode
+        service.test_mode = True
+        result = service.analyze_policy(sample_policy_text, "https://example.com")
         
-        # Create analysis result
-        result = AnalysisResult(
-            score=75,
-            summary="This is a test summary",
-            red_flags=["Test flag 1", "Test flag 2"],
-            user_action_items=[action],
-            timestamp=datetime.now(timezone.utc),
-            url="https://example.com/privacy"
-        )
+        assert isinstance(result, AnalysisResult)
+        assert 0 <= result.score <= 100
+        assert len(result.summary) > 0
+    
+    def test_mock_analysis_concerning_keywords(self):
+        """Mock analysis should detect concerning keywords."""
+        from service_llm import LLMService
+        service = LLMService()
+        service.test_mode = True
         
-        assert result.score == 75
-        assert len(result.red_flags) == 2
-        assert len(result.user_action_items) == 1
+        concerning_text = "We sell your data to third parties and retain it indefinitely. We track you across websites."
+        result = service.analyze_policy(concerning_text, "")
         
-        print("✓ Models test passed")
-        return True
-    except Exception as e:
-        print(f"✗ Models test failed: {e}")
-        return False
+        # Should have lower score due to concerning keywords
+        assert result.score <= 70
+        assert len(result.red_flags) > 0
 
 
 if __name__ == "__main__":
-    print("Running backend tests...\n")
-    
-    tests = [
-        test_cache_key_generation,
-        test_imports,
-        test_cache_key_function,
-        test_models
-    ]
-    
-    results = []
-    for test in tests:
-        try:
-            results.append(test())
-        except Exception as e:
-            print(f"✗ Test {test.__name__} failed with exception: {e}")
-            results.append(False)
-    
-    print(f"\n{'='*50}")
-    print(f"Tests passed: {sum(results)}/{len(results)}")
-    
-    if all(results):
-        print("All tests passed! ✓")
-        sys.exit(0)
-    else:
-        print("Some tests failed! ✗")
-        sys.exit(1)
+    pytest.main([__file__, "-v"])

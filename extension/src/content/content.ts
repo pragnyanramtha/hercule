@@ -8,7 +8,9 @@ console.log('Privacy Policy Analyzer content script loaded');
 // Constants
 const MAX_TEXT_LENGTH = 50000;
 const PRIVACY_KEYWORDS = ['privacy', 'terms', 'cookies'];
-const EXTRACTION_TIMEOUT = 10000; // 10 seconds
+const EXTRACTION_TIMEOUT = 10000;
+const MAX_RETRIES = 2;
+const RETRY_DELAY = 1000;
 
 interface ExtractedData {
   success: boolean;
@@ -23,8 +25,14 @@ interface PrivacyLinks {
 }
 
 /**
+ * Delay helper for retry logic
+ */
+function delay(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/**
  * Scans the current page for links containing privacy-related keywords
- * Requirements: 1.1, 1.2, 1.3
  */
 function scanForPrivacyLinks(): PrivacyLinks {
   try {
@@ -35,51 +43,39 @@ function scanForPrivacyLinks(): PrivacyLinks {
       const linkText = link.textContent?.toLowerCase() || '';
       const href = link.getAttribute('href');
 
-      // Check if link text contains any privacy keywords (case-insensitive)
       const hasKeyword = PRIVACY_KEYWORDS.some(keyword => 
         linkText.includes(keyword)
       );
 
       if (hasKeyword && href) {
-        // Convert relative URLs to absolute URLs
         try {
           const absoluteUrl = new URL(href, window.location.href);
           matchingUrls.push(absoluteUrl.href);
-        } catch (e) {
+        } catch {
           console.warn('Invalid URL:', href);
         }
       }
     });
 
-    // Store links in Chrome storage for popup access (Requirement 1.3)
     chrome.storage.local.set({ 
       privacyLinks: matchingUrls,
       lastScanned: new Date().toISOString()
     });
 
-    return {
-      urls: matchingUrls,
-      found: matchingUrls.length > 0
-    };
+    return { urls: matchingUrls, found: matchingUrls.length > 0 };
   } catch (error) {
     console.error('Error scanning for privacy links:', error);
-    return {
-      urls: [],
-      found: false
-    };
+    return { urls: [], found: false };
   }
 }
 
 /**
  * Extracts visible text from the current page
- * Requirements: 2.2, 2.3
  */
 function extractPolicyText(): string {
   try {
-    // Extract all visible text from document body
     const text = document.body.innerText || '';
     
-    // Truncate to max length if needed (Requirement 2.3)
     if (text.length > MAX_TEXT_LENGTH) {
       return text.substring(0, MAX_TEXT_LENGTH) + '\n\n[Text truncated at 50,000 characters]';
     }
@@ -92,46 +88,41 @@ function extractPolicyText(): string {
 }
 
 /**
- * Fetches and extracts text from a privacy policy URL
- * Requirements: 2.1, 2.2, 2.3, 2.5
+ * Fetches and extracts text from a privacy policy URL with retry logic
  */
-async function fetchPolicyFromUrl(url: string): Promise<ExtractedData> {
+async function fetchPolicyFromUrl(url: string, retryCount = 0): Promise<ExtractedData> {
   try {
-    // Create a timeout promise
-    const timeoutPromise = new Promise<never>((_, reject) => {
-      setTimeout(() => reject(new Error('Page load timeout')), EXTRACTION_TIMEOUT);
-    });
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), EXTRACTION_TIMEOUT);
 
-    // Fetch the page content
-    const fetchPromise = fetch(url).then(async (response) => {
-      if (!response.ok) {
-        throw new Error(`Failed to fetch policy: ${response.status}`);
-      }
-      
-      const html = await response.text();
-      
-      // Parse HTML and extract text
-      const parser = new DOMParser();
-      const doc = parser.parseFromString(html, 'text/html');
-      const text = doc.body.innerText || '';
-      
-      // Truncate if needed
-      const finalText = text.length > MAX_TEXT_LENGTH 
-        ? text.substring(0, MAX_TEXT_LENGTH) + '\n\n[Text truncated at 50,000 characters]'
-        : text;
-      
-      return {
-        success: true,
-        policyText: finalText,
-        policyUrl: url
-      };
-    });
+    const response = await fetch(url, { signal: controller.signal });
+    clearTimeout(timeoutId);
 
-    // Race between fetch and timeout (Requirement 2.5)
-    return await Promise.race([fetchPromise, timeoutPromise]);
+    if (!response.ok) {
+      throw new Error(`Failed to fetch policy: ${response.status}`);
+    }
+    
+    const html = await response.text();
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(html, 'text/html');
+    const text = doc.body.innerText || '';
+    
+    const finalText = text.length > MAX_TEXT_LENGTH 
+      ? text.substring(0, MAX_TEXT_LENGTH) + '\n\n[Text truncated at 50,000 characters]'
+      : text;
+    
+    return { success: true, policyText: finalText, policyUrl: url };
     
   } catch (error) {
-    console.error('Error fetching policy from URL:', error);
+    console.error(`Error fetching policy (attempt ${retryCount + 1}):`, error);
+    
+    // Retry logic
+    if (retryCount < MAX_RETRIES) {
+      console.log(`Retrying fetch... attempt ${retryCount + 2}`);
+      await delay(RETRY_DELAY * (retryCount + 1));
+      return fetchPolicyFromUrl(url, retryCount + 1);
+    }
+    
     return {
       success: false,
       error: error instanceof Error ? error.message : 'Failed to fetch policy'
@@ -141,56 +132,33 @@ async function fetchPolicyFromUrl(url: string): Promise<ExtractedData> {
 
 /**
  * Handles messages from the popup
- * Requirements: 1.5, 2.4
  */
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   (async () => {
     try {
       if (message.action === 'scanLinks') {
-        // Scan current page for privacy links
         const links = scanForPrivacyLinks();
-        sendResponse({
-          success: true,
-          links: links.urls,
-          found: links.found
-        });
+        sendResponse({ success: true, links: links.urls, found: links.found });
         
       } else if (message.action === 'extractCurrentPage') {
-        // Extract text from current page
         try {
           const text = extractPolicyText();
-          sendResponse({
-            success: true,
-            policyText: text,
-            policyUrl: window.location.href
-          });
+          sendResponse({ success: true, policyText: text, policyUrl: window.location.href });
         } catch (error) {
-          sendResponse({
-            success: false,
-            error: 'Failed to extract text from current page'
-          });
+          sendResponse({ success: false, error: 'Failed to extract text from current page' });
         }
         
       } else if (message.action === 'extractFromUrl') {
-        // Fetch and extract text from a specific URL
         if (!message.url) {
-          sendResponse({
-            success: false,
-            error: 'No URL provided'
-          });
+          sendResponse({ success: false, error: 'No URL provided' });
           return;
         }
-        
         const result = await fetchPolicyFromUrl(message.url);
         sendResponse(result);
         
       } else if (message.action === 'getLinks') {
-        // Return previously scanned links from storage
         const data = await chrome.storage.local.get(['privacyLinks']);
-        sendResponse({
-          success: true,
-          links: data.privacyLinks || []
-        });
+        sendResponse({ success: true, links: data.privacyLinks || [] });
       }
     } catch (error) {
       console.error('Error handling message:', error);
@@ -201,20 +169,16 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     }
   })();
   
-  // Return true to indicate async response
   return true;
 });
 
-// Automatically scan for privacy links when page loads (Requirement 1.1)
+// Auto-scan on page load
 if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', () => {
-    scanForPrivacyLinks();
-  });
+  document.addEventListener('DOMContentLoaded', () => scanForPrivacyLinks());
 } else {
   scanForPrivacyLinks();
 }
 
-// Signal completion to popup (Requirement 1.5)
 chrome.storage.local.set({ 
   scanComplete: true,
   scanTimestamp: new Date().toISOString()
