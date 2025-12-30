@@ -3,6 +3,8 @@ Privacy Policy Analyzer API
 FastAPI backend for analyzing privacy policies using Azure OpenAI.
 """
 import os
+import logging
+import time
 from datetime import datetime, timezone
 from typing import List
 
@@ -17,6 +19,15 @@ from cache import cache_manager
 
 # Load environment variables
 load_dotenv()
+
+# Configure logging
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
+logging.basicConfig(
+    level=getattr(logging, LOG_LEVEL, logging.INFO),
+    format="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S"
+)
+logger = logging.getLogger("privacy-api")
 
 # Initialize FastAPI app
 app = FastAPI(title="Privacy Policy Analyzer API")
@@ -34,6 +45,26 @@ app.add_middleware(
 
 # Initialize LLM service
 llm_service = LLMService()
+
+
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    """Middleware to log all incoming requests."""
+    start_time = time.time()
+    
+    # Log incoming request
+    logger.info(f"➡️  {request.method} {request.url.path} from {request.client.host if request.client else 'unknown'}")
+    
+    response = await call_next(request)
+    
+    # Calculate duration
+    duration_ms = (time.time() - start_time) * 1000
+    
+    # Log response
+    status_emoji = "✅" if response.status_code < 400 else "❌"
+    logger.info(f"{status_emoji} {request.method} {request.url.path} → {response.status_code} ({duration_ms:.1f}ms)")
+    
+    return response
 
 
 class AnalyzeRequest(BaseModel):
@@ -100,24 +131,33 @@ async def analyze_policy(request: AnalyzeRequest):
     """
     # Generate cache key from policy text
     text_hash = cache_manager.generate_key(request.policy_text)
+    policy_preview = request.policy_text[:100].replace('\n', ' ')[:50] + "..."
+    
+    logger.debug(f"Policy preview: {policy_preview}")
+    logger.info(f"📝 Analyzing policy from URL: {request.url or 'N/A'} (hash: {text_hash[:12]}...)")
     
     # Check cache first
     cached_result = cache_manager.get(text_hash)
     if cached_result is not None:
-        print(f"Cache hit for hash: {text_hash[:16]}...")
+        logger.info(f"💾 Cache HIT - returning cached result (score: {cached_result.score})")
         return cached_result
     
-    print(f"Cache miss for hash: {text_hash[:16]}... Calling LLM")
+    logger.info(f"🔍 Cache MISS - calling {llm_service.provider.upper()} LLM...")
     
     # Cache miss - call LLM service
+    start_time = time.time()
     try:
         result = llm_service.analyze_policy(request.policy_text, request.url)
+        duration_ms = (time.time() - start_time) * 1000
+        logger.info(f"✨ Analysis complete - Score: {result.score}/100, Red flags: {len(result.red_flags)}, Duration: {duration_ms:.0f}ms")
     except ValueError as e:
+        logger.warning(f"⚠️  Validation error: {e}")
         raise HTTPException(status_code=400, detail=str(e))
     except ConnectionError as e:
+        logger.error(f"🔌 Connection error to LLM service: {e}")
         raise HTTPException(status_code=503, detail=f"LLM service unavailable: {e}")
     except Exception as e:
-        print(f"Error analyzing policy: {type(e).__name__}: {e}")
+        logger.error(f"❌ Error analyzing policy: {type(e).__name__}: {e}", exc_info=True)
         raise HTTPException(
             status_code=500,
             detail=f"Failed to analyze policy: {type(e).__name__}"
@@ -125,6 +165,7 @@ async def analyze_policy(request: AnalyzeRequest):
     
     # Store result in cache
     cache_manager.set(text_hash, result)
+    logger.debug(f"💾 Result cached (cache size: {cache_manager.size()})")
     
     return result
 
