@@ -67,6 +67,8 @@ class HealthResponse(BaseModel):
     timestamp: str
     cache_size: int
     test_mode: bool
+    provider: str
+    dev_mode: bool
 
 
 @app.get("/health", response_model=HealthResponse)
@@ -76,7 +78,9 @@ async def health_check():
         status="healthy",
         timestamp=datetime.now(timezone.utc).isoformat(),
         cache_size=cache_manager.size(),
-        test_mode=llm_service.test_mode
+        test_mode=llm_service.test_mode,
+        provider=llm_service.provider,
+        dev_mode=getattr(llm_service, 'dev_mode', False)
     )
 
 

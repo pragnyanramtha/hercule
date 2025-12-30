@@ -2,29 +2,47 @@ import os
 import json
 from typing import Dict, Any
 from openai import AzureOpenAI
+from groq import Groq
 from models import AnalysisResult, ActionItem
 from datetime import datetime, timezone
 
 
 class LLMService:
-    """Service for analyzing privacy policies using Azure OpenAI."""
+    """Service for analyzing privacy policies using Azure OpenAI or Groq (dev mode)."""
     
     def __init__(self):
-        """Initialize Azure OpenAI client with environment variables."""
-        # Check if we're in test mode (no API key provided)
-        self.test_mode = not os.getenv("AZURE_OPENAI_KEY")
+        """Initialize LLM client with environment variables."""
+        # Check for dev mode (Groq API)
+        self.dev_mode = os.getenv("DEV_MODE", "").lower() == "true"
+        self.groq_api_key = os.getenv("GROQ_API_KEY")
+        self.azure_api_key = os.getenv("AZURE_OPENAI_KEY")
         
-        if not self.test_mode:
+        # Determine which mode to use
+        if self.dev_mode and self.groq_api_key:
+            # Dev mode: Use Groq API
+            self.test_mode = False
+            self.provider = "groq"
+            self.client = Groq(api_key=self.groq_api_key)
+            self.deployment = os.getenv("GROQ_MODEL", "moonshotai/kimi-k2-instruct-0905")
+            print("🚀 Running in DEV MODE - using Groq API")
+        elif self.azure_api_key:
+            # Production mode: Use Azure OpenAI
+            self.test_mode = False
+            self.provider = "azure"
             self.client = AzureOpenAI(
-                api_key=os.getenv("AZURE_OPENAI_KEY"),
+                api_key=self.azure_api_key,
                 api_version="2024-02-15-preview",
                 azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT")
             )
             self.deployment = os.getenv("AZURE_OPENAI_DEPLOYMENT", "gpt-4")
+            print("🔵 Running in PRODUCTION MODE - using Azure OpenAI")
         else:
-            print("⚠️  Running in TEST MODE - using mock LLM responses")
+            # Test mode: No API keys provided
+            self.test_mode = True
+            self.provider = "mock"
             self.client = None
             self.deployment = None
+            print("⚠️  Running in TEST MODE - using mock LLM responses")
     
     def _build_system_prompt(self) -> str:
         """Constructs the Privacy Lawyer Agent system prompt."""
@@ -165,7 +183,7 @@ Return ONLY the JSON object, no additional text."""
     
     def analyze_policy(self, policy_text: str, url: str) -> AnalysisResult:
         """
-        Sends policy text to Azure OpenAI and returns structured analysis.
+        Sends policy text to LLM (Azure OpenAI or Groq) and returns structured analysis.
         
         Args:
             policy_text: The privacy policy text to analyze (max 50,000 chars)
@@ -187,16 +205,30 @@ Return ONLY the JSON object, no additional text."""
             truncated_text += "\n[Text truncated at 50,000 characters]"
         
         try:
-            response = self.client.chat.completions.create(
-                model=self.deployment,
-                messages=[
-                    {"role": "system", "content": self._build_system_prompt()},
-                    {"role": "user", "content": f"Analyze this privacy policy:\n\n{truncated_text}"}
-                ],
-                temperature=0.3,
-                max_tokens=2000,
-                response_format={"type": "json_object"}
-            )
+            if self.provider == "groq":
+                # Groq API call
+                response = self.client.chat.completions.create(
+                    model=self.deployment,
+                    messages=[
+                        {"role": "system", "content": self._build_system_prompt()},
+                        {"role": "user", "content": f"Analyze this privacy policy:\n\n{truncated_text}"}
+                    ],
+                    temperature=0.3,
+                    max_tokens=2000,
+                    response_format={"type": "json_object"}
+                )
+            else:
+                # Azure OpenAI API call
+                response = self.client.chat.completions.create(
+                    model=self.deployment,
+                    messages=[
+                        {"role": "system", "content": self._build_system_prompt()},
+                        {"role": "user", "content": f"Analyze this privacy policy:\n\n{truncated_text}"}
+                    ],
+                    temperature=0.3,
+                    max_tokens=2000,
+                    response_format={"type": "json_object"}
+                )
             
             # Parse the response
             content = response.choices[0].message.content
