@@ -20,8 +20,8 @@ A browser extension that leverages Azure OpenAI to democratize privacy policy co
 ### 1. Clone the Repository
 
 ```bash
-git clone <repository-url>
-cd privacy-policy-analyzer
+git clone git@github.com:pragnyanramtha/hercule.git
+cd hercule
 ```
 
 ### 2. Configure Azure OpenAI Credentials
@@ -206,12 +206,16 @@ This project was created for the Microsoft Imagine Cup. Contributions are welcom
 
 ## License
 
-[Add your license here]
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
 ## Support
 
 For issues and questions, please open an issue on GitHub.
 
 ---
+# Contributions 
 
-**Built with ❤️ for the Microsoft Imagine Cup**
+- pragnyanramtha
+
+open a pull request and become a contributer !
+
