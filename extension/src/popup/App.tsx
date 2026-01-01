@@ -41,9 +41,40 @@ function AppContent() {
         return;
       }
 
-      const response = await chrome.tabs.sendMessage(tab.id, { 
-        action: 'extractCurrentPage' 
-      });
+      // Check if this is a restricted page
+      if (tab.url?.startsWith('chrome://') || tab.url?.startsWith('chrome-extension://') || 
+          tab.url?.startsWith('about:') || tab.url?.startsWith('edge://')) {
+        setError('Cannot analyze browser internal pages. Please navigate to a website.');
+        setLoading({ isLoading: false, message: '' });
+        return;
+      }
+
+      let response;
+      try {
+        response = await chrome.tabs.sendMessage(tab.id, { 
+          action: 'extractCurrentPage' 
+        });
+      } catch (connectionError) {
+        // Content script not loaded - inject it programmatically
+        console.log('Content script not found, injecting...');
+        try {
+          await chrome.scripting.executeScript({
+            target: { tabId: tab.id },
+            files: ['content/content.js']
+          });
+          // Wait a moment for the script to initialize
+          await new Promise(resolve => setTimeout(resolve, 100));
+          // Retry the message
+          response = await chrome.tabs.sendMessage(tab.id, { 
+            action: 'extractCurrentPage' 
+          });
+        } catch (injectError) {
+          console.error('Failed to inject content script:', injectError);
+          setError('Cannot access this page. Try refreshing the page or check if the site allows extensions.');
+          setLoading({ isLoading: false, message: '' });
+          return;
+        }
+      }
 
       setComponentLoading({ extraction: false, analysis: true });
 
