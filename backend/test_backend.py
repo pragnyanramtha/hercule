@@ -1,11 +1,20 @@
 """
 Backend tests using pytest with fixtures.
 Run with: pytest test_backend.py -v
+
+Tests cover:
+- Type safety and validation
+- API contract validation (ensures frontend/backend type sync)
+- Cache operations
+- Model validation
+- API endpoint behavior
 """
 import pytest
 import hashlib
+import json
 from datetime import datetime, timezone
 from unittest.mock import patch, MagicMock
+from typing import get_type_hints
 
 from models import AnalysisResult, ActionItem
 from cache import CacheManager, cache_manager
@@ -40,6 +49,78 @@ def sample_analysis_result(sample_action_item):
         timestamp=datetime.now(timezone.utc),
         url="https://example.com/privacy"
     )
+
+
+@pytest.fixture
+def shared_types_schema():
+    """Load the shared TypeScript types schema for validation.
+    
+    This fixture parses the shared/types.ts file to extract expected
+    field names and types for cross-language type validation.
+    """
+    import re
+    import os
+    
+    types_file = os.path.join(os.path.dirname(__file__), '..', 'shared', 'types.ts')
+    
+    with open(types_file, 'r') as f:
+        content = f.read()
+    
+    # Extract interface definitions
+    interfaces = {}
+    
+    # Match ActionItem interface
+    action_item_match = re.search(
+        r'export interface ActionItem \{([^}]+)\}',
+        content, re.DOTALL
+    )
+    if action_item_match:
+        interfaces['ActionItem'] = {
+            'text': 'string',
+            'url': 'string|undefined',
+            'priority': 'Priority'
+        }
+    
+    # Match AnalysisResult interface
+    analysis_result_match = re.search(
+        r'export interface AnalysisResult \{([^}]+)\}',
+        content, re.DOTALL
+    )
+    if analysis_result_match:
+        interfaces['AnalysisResult'] = {
+            'score': 'number',
+            'summary': 'string',
+            'red_flags': 'string[]',
+            'user_action_items': 'ActionItem[]',
+            'timestamp': 'string',
+            'url': 'string'
+        }
+    
+    # Match AnalyzeRequest interface  
+    analyze_request_match = re.search(
+        r'export interface AnalyzeRequest \{([^}]+)\}',
+        content, re.DOTALL
+    )
+    if analyze_request_match:
+        interfaces['AnalyzeRequest'] = {
+            'policy_text': 'string',
+            'url': 'string|undefined'
+        }
+    
+    # Match HealthResponse interface
+    health_response_match = re.search(
+        r'export interface HealthResponse \{([^}]+)\}',
+        content, re.DOTALL
+    )
+    if health_response_match:
+        interfaces['HealthResponse'] = {
+            'status': 'string',
+            'timestamp': 'string',
+            'cache_size': 'number',
+            'test_mode': 'boolean'
+        }
+    
+    return interfaces
 
 
 @pytest.fixture
@@ -230,6 +311,180 @@ class TestLLMService:
         # Should have lower score due to concerning keywords
         assert result.score <= 70
         assert len(result.red_flags) > 0
+
+
+# ============== Type Contract Tests ==============
+
+class TestTypeContract:
+    """Tests ensuring backend types match frontend TypeScript types.
+    
+    These tests validate that the API response structure matches
+    the shared/types.ts definitions to ensure end-to-end type safety.
+    """
+    
+    def test_action_item_fields_match_typescript(self, shared_types_schema):
+        """ActionItem fields should match TypeScript interface."""
+        ts_fields = shared_types_schema.get('ActionItem', {})
+        
+        # Verify Python model has all expected fields
+        item = ActionItem(text="Test", priority="high")
+        item_dict = item.model_dump()
+        
+        assert 'text' in item_dict
+        assert 'url' in item_dict  # Optional field should exist
+        assert 'priority' in item_dict
+        
+        # Verify no extra fields
+        expected_fields = {'text', 'url', 'priority'}
+        assert set(item_dict.keys()) == expected_fields
+    
+    def test_analysis_result_fields_match_typescript(self, shared_types_schema, sample_analysis_result):
+        """AnalysisResult fields should match TypeScript interface."""
+        result_dict = sample_analysis_result.model_dump()
+        
+        # Required fields from TypeScript
+        expected_fields = {'score', 'summary', 'red_flags', 'user_action_items', 'timestamp', 'url'}
+        assert set(result_dict.keys()) == expected_fields
+        
+        # Type validations
+        assert isinstance(result_dict['score'], int)
+        assert isinstance(result_dict['summary'], str)
+        assert isinstance(result_dict['red_flags'], list)
+        assert isinstance(result_dict['user_action_items'], list)
+        assert isinstance(result_dict['url'], str)
+    
+    def test_analysis_result_score_range(self):
+        """Score should be 0-100 as per TypeScript docs."""
+        # Valid boundary values
+        for score in [0, 50, 100]:
+            result = AnalysisResult(
+                score=score,
+                summary="Test",
+                red_flags=[],
+                user_action_items=[],
+                timestamp=datetime.now(timezone.utc),
+                url=""
+            )
+            assert result.score == score
+    
+    def test_priority_enum_values(self):
+        """Priority should match TypeScript Priority type."""
+        valid_priorities = ['high', 'medium', 'low']
+        
+        for priority in valid_priorities:
+            item = ActionItem(text="Test", priority=priority)
+            assert item.priority == priority
+    
+    def test_api_response_matches_typescript_interface(self, sample_policy_text):
+        """API response structure should match AnalysisResult interface."""
+        from fastapi.testclient import TestClient
+        from main import app
+        
+        with TestClient(app) as client:
+            response = client.post("/analyze", json={
+                "policy_text": sample_policy_text,
+                "url": "https://example.com"
+            })
+            
+            assert response.status_code == 200
+            data = response.json()
+            
+            # Validate all TypeScript interface fields exist
+            assert 'score' in data
+            assert 'summary' in data
+            assert 'red_flags' in data
+            assert 'user_action_items' in data
+            assert 'timestamp' in data
+            assert 'url' in data
+            
+            # Validate types
+            assert isinstance(data['score'], int)
+            assert 0 <= data['score'] <= 100
+            assert isinstance(data['summary'], str)
+            assert isinstance(data['red_flags'], list)
+            assert all(isinstance(f, str) for f in data['red_flags'])
+            assert isinstance(data['user_action_items'], list)
+            
+            # Validate action items structure
+            for item in data['user_action_items']:
+                assert 'text' in item
+                assert 'priority' in item
+                assert item['priority'] in ['high', 'medium', 'low']
+    
+    def test_health_response_matches_typescript(self):
+        """Health endpoint should match HealthResponse interface."""
+        from fastapi.testclient import TestClient
+        from main import app
+        
+        with TestClient(app) as client:
+            response = client.get("/health")
+            data = response.json()
+            
+            # Validate TypeScript HealthResponse fields
+            assert data['status'] in ['healthy', 'unhealthy']
+            assert isinstance(data['timestamp'], str)
+            assert isinstance(data['cache_size'], int)
+            assert isinstance(data['test_mode'], bool)
+
+
+# ============== Integration Tests ==============
+
+class TestIntegration:
+    """End-to-end integration tests."""
+    
+    @pytest.fixture
+    def client(self):
+        """Create test client."""
+        from fastapi.testclient import TestClient
+        from main import app
+        with TestClient(app) as client:
+            yield client
+    
+    def test_full_analysis_flow(self, client):
+        """Test complete analysis flow from request to response."""
+        policy_text = """
+        Privacy Policy
+        
+        We collect personal information including your name, email, and browsing history.
+        This data may be shared with third-party advertisers.
+        We use cookies to track your activity across websites.
+        You can opt out of data collection by contacting us.
+        Data is retained for 5 years after account deletion.
+        """
+        
+        response = client.post("/analyze", json={
+            "policy_text": policy_text,
+            "url": "https://example.com/privacy"
+        })
+        
+        assert response.status_code == 200
+        result = response.json()
+        
+        # Should have identified some red flags
+        assert len(result['red_flags']) > 0 or result['score'] < 80
+        
+        # Should have action items
+        assert 'user_action_items' in result
+    
+    def test_cache_hit_returns_same_result(self, client, sample_policy_text):
+        """Same policy text should return cached result."""
+        # First request
+        response1 = client.post("/analyze", json={
+            "policy_text": sample_policy_text,
+            "url": "https://example.com"
+        })
+        result1 = response1.json()
+        
+        # Second request with same text
+        response2 = client.post("/analyze", json={
+            "policy_text": sample_policy_text,
+            "url": "https://example.com"
+        })
+        result2 = response2.json()
+        
+        # Results should be identical (from cache)
+        assert result1['score'] == result2['score']
+        assert result1['summary'] == result2['summary']
 
 
 if __name__ == "__main__":

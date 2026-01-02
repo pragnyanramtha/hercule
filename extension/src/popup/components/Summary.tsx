@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Icons } from './Icons';
 
 interface SummaryProps {
   summary: string;
@@ -7,28 +8,30 @@ interface SummaryProps {
 function Summary({ summary }: SummaryProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   const MAX_LENGTH = 500;
-  
-  // Check if summary needs truncation
+
   const needsTruncation = summary.length > MAX_LENGTH;
-  
-  // Get display text based on expansion state
-  const displayText = needsTruncation && !isExpanded 
+
+  const displayText = needsTruncation && !isExpanded
     ? summary.substring(0, MAX_LENGTH) + '...'
     : summary;
 
   return (
-    <div className="bg-white rounded-lg p-4 shadow">
-      <h2 className="text-lg font-semibold mb-2 text-gray-800">Summary</h2>
-      <p className="text-gray-700 text-sm leading-relaxed whitespace-pre-wrap">
+    <div className="bg-slate-900/40 border border-slate-800/60 rounded-3xl p-6 backdrop-blur-sm group hover:bg-slate-900/60 transition-colors duration-300">
+      <div className="flex items-center gap-2 mb-4">
+        <Icons.Document className="w-4 h-4 text-indigo-400" />
+        <h2 className="text-sm font-semibold text-slate-200 uppercase tracking-wide">Summary</h2>
+      </div>
+      <p className="text-slate-300/90 text-sm leading-7 whitespace-pre-wrap font-normal">
         {displayText}
       </p>
-      
+
       {needsTruncation && (
         <button
           onClick={() => setIsExpanded(!isExpanded)}
-          className="mt-3 text-blue-600 hover:text-blue-800 text-sm font-medium focus:outline-none focus:underline"
+          className="mt-6 flex items-center gap-2 text-xs font-semibold text-indigo-400 hover:text-indigo-300 transition-colors uppercase tracking-wider"
         >
-          {isExpanded ? 'Show Less' : 'Read More'}
+          {isExpanded ? 'Show Less' : 'Read Full Analysis'}
+          <Icons.ChevronDown className={`w-3 h-3 transform transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
         </button>
       )}
     </div>

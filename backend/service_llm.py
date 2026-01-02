@@ -1,30 +1,54 @@
 import os
 import json
+import logging
+import time
 from typing import Dict, Any
 from openai import AzureOpenAI
+from groq import Groq
 from models import AnalysisResult, ActionItem
 from datetime import datetime, timezone
 
+logger = logging.getLogger("privacy-api.llm")
+
 
 class LLMService:
-    """Service for analyzing privacy policies using Azure OpenAI."""
+    """Service for analyzing privacy policies using Azure OpenAI or Groq (dev mode)."""
     
     def __init__(self):
-        """Initialize Azure OpenAI client with environment variables."""
-        # Check if we're in test mode (no API key provided)
-        self.test_mode = not os.getenv("AZURE_OPENAI_KEY")
+        """Initialize LLM client with environment variables."""
+        # Check for dev mode (Groq API)
+        self.dev_mode = os.getenv("DEV_MODE", "").lower() == "true"
+        self.groq_api_key = os.getenv("GROQ_API_KEY")
+        self.azure_api_key = os.getenv("AZURE_OPENAI_KEY")
         
-        if not self.test_mode:
+        # Determine which mode to use
+        if self.dev_mode and self.groq_api_key:
+            # Dev mode: Use Groq API
+            self.test_mode = False
+            self.provider = "groq"
+            self.client = Groq(api_key=self.groq_api_key)
+            self.deployment = os.getenv("GROQ_MODEL", "moonshotai/kimi-k2-instruct-0905")
+            logger.info("🚀 Running in DEV MODE - using Groq API")
+            logger.info(f"   Model: {self.deployment}")
+        elif self.azure_api_key:
+            # Production mode: Use Azure OpenAI
+            self.test_mode = False
+            self.provider = "azure"
             self.client = AzureOpenAI(
-                api_key=os.getenv("AZURE_OPENAI_KEY"),
+                api_key=self.azure_api_key,
                 api_version="2024-02-15-preview",
                 azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT")
             )
             self.deployment = os.getenv("AZURE_OPENAI_DEPLOYMENT", "gpt-4")
+            logger.info("🔵 Running in PRODUCTION MODE - using Azure OpenAI")
+            logger.info(f"   Deployment: {self.deployment}")
         else:
-            print("⚠️  Running in TEST MODE - using mock LLM responses")
+            # Test mode: No API keys provided
+            self.test_mode = True
+            self.provider = "mock"
             self.client = None
             self.deployment = None
+            logger.warning("⚠️  Running in TEST MODE - using mock LLM responses")
     
     def _build_system_prompt(self) -> str:
         """Constructs the Privacy Lawyer Agent system prompt."""
@@ -165,7 +189,7 @@ Return ONLY the JSON object, no additional text."""
     
     def analyze_policy(self, policy_text: str, url: str) -> AnalysisResult:
         """
-        Sends policy text to Azure OpenAI and returns structured analysis.
+        Sends policy text to LLM (Azure OpenAI or Groq) and returns structured analysis.
         
         Args:
             policy_text: The privacy policy text to analyze (max 50,000 chars)
@@ -179,32 +203,66 @@ Return ONLY the JSON object, no additional text."""
         """
         # If in test mode, return mock analysis
         if self.test_mode:
+            logger.debug("Using mock analysis (test mode)")
             return self._generate_mock_analysis(policy_text, url)
         
         # Truncate policy text to 50,000 characters
+        original_length = len(policy_text)
         truncated_text = policy_text[:50000]
-        if len(policy_text) > 50000:
+        if original_length > 50000:
             truncated_text += "\n[Text truncated at 50,000 characters]"
+            logger.info(f"📄 Policy text truncated: {original_length:,} → 50,000 chars")
+        else:
+            logger.debug(f"📄 Policy text length: {original_length:,} chars")
         
         try:
-            response = self.client.chat.completions.create(
-                model=self.deployment,
-                messages=[
-                    {"role": "system", "content": self._build_system_prompt()},
-                    {"role": "user", "content": f"Analyze this privacy policy:\n\n{truncated_text}"}
-                ],
-                temperature=0.3,
-                max_tokens=2000,
-                response_format={"type": "json_object"}
-            )
+            logger.debug(f"Calling {self.provider} API with model: {self.deployment}")
+            start_time = time.time()
+            
+            if self.provider == "groq":
+                # Groq API call
+                response = self.client.chat.completions.create(
+                    model=self.deployment,
+                    messages=[
+                        {"role": "system", "content": self._build_system_prompt()},
+                        {"role": "user", "content": f"Analyze this privacy policy:\n\n{truncated_text}"}
+                    ],
+                    temperature=0.3,
+                    max_tokens=2000,
+                    response_format={"type": "json_object"}
+                )
+            else:
+                # Azure OpenAI API call
+                response = self.client.chat.completions.create(
+                    model=self.deployment,
+                    messages=[
+                        {"role": "system", "content": self._build_system_prompt()},
+                        {"role": "user", "content": f"Analyze this privacy policy:\n\n{truncated_text}"}
+                    ],
+                    temperature=0.3,
+                    max_tokens=2000,
+                    response_format={"type": "json_object"}
+                )
             
             # Parse the response
+            api_duration = (time.time() - start_time) * 1000
+            logger.info(f"🤖 LLM API response received in {api_duration:.0f}ms")
+            
             content = response.choices[0].message.content
+            logger.debug(f"Response content length: {len(content)} chars")
+            
             result_dict = json.loads(content)
             
             # Validate response structure
             if not self._validate_response(result_dict):
+                logger.error(f"Invalid LLM response structure. Keys: {list(result_dict.keys())}")
                 raise ValueError("LLM response missing required fields")
+            
+            # Log analysis results
+            score = result_dict["score"]
+            num_red_flags = len(result_dict.get("red_flags", []))
+            num_actions = len(result_dict.get("user_action_items", []))
+            logger.info(f"📊 Analysis results - Score: {score}/100, Red flags: {num_red_flags}, Actions: {num_actions}")
             
             # Convert to AnalysisResult model
             action_items = [
@@ -220,7 +278,12 @@ Return ONLY the JSON object, no additional text."""
                 url=url
             )
             
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse LLM JSON response: {e}")
+            logger.debug(f"Raw response: {content[:500]}...")
+            raise Exception(f"Failed to parse LLM response: {str(e)}")
         except Exception as e:
+            logger.error(f"LLM analysis failed: {type(e).__name__}: {e}")
             raise Exception(f"Failed to analyze policy: {str(e)}")
     
     def _validate_response(self, response: Dict[str, Any]) -> bool:

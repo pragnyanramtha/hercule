@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Icons } from './Icons';
 
 interface RedFlagsProps {
   redFlags: string[];
@@ -6,46 +7,50 @@ interface RedFlagsProps {
 
 function RedFlags({ redFlags }: RedFlagsProps) {
   const [isExpanded, setIsExpanded] = useState(false);
-  const MAX_VISIBLE = 5;
-  
-  // Check if we need to show "Show More" button
+  const MAX_VISIBLE = 4;
+
   const needsExpansion = redFlags.length > MAX_VISIBLE;
-  
-  // Get display flags based on expansion state
-  const displayFlags = needsExpansion && !isExpanded 
+
+  const displayFlags = needsExpansion && !isExpanded
     ? redFlags.slice(0, MAX_VISIBLE)
     : redFlags;
 
-  // If no red flags, show positive message
   if (redFlags.length === 0) {
     return (
-      <div className="bg-green-50 border border-green-200 rounded-lg p-4 shadow">
-        <h2 className="text-lg font-semibold mb-2 text-green-700">Red Flags</h2>
-        <p className="text-green-600 text-sm">
-          ✓ No major concerns identified
+      <div className="bg-emerald-950/20 border border-emerald-500/10 rounded-3xl p-6 backdrop-blur-sm">
+        <h2 className="text-sm font-semibold mb-2 text-emerald-400 flex items-center gap-2 uppercase tracking-wide">
+          <Icons.Shield className="w-4 h-4" /> Safe and Sound
+        </h2>
+        <p className="text-emerald-200/70 text-sm font-normal leading-relaxed">
+          No major privacy concerns were identified.
         </p>
       </div>
     );
   }
 
   return (
-    <div className="bg-red-50 border border-red-200 rounded-lg p-4 shadow">
-      <h2 className="text-lg font-semibold mb-3 text-red-700">Red Flags</h2>
-      <ul className="space-y-2">
+    <div className="bg-rose-950/20 border border-rose-500/10 rounded-3xl p-6 backdrop-blur-sm">
+      <h2 className="text-sm font-semibold mb-4 text-rose-400 flex items-center gap-2 uppercase tracking-wide">
+        <Icons.Alert className="w-4 h-4" /> Red Flags
+      </h2>
+      <ul className="space-y-3">
         {displayFlags.map((flag, index) => (
-          <li key={index} className="flex items-start gap-2 text-sm text-gray-800">
-            <span className="text-orange-500 flex-shrink-0 mt-0.5">⚠️</span>
-            <span className="leading-relaxed">{flag}</span>
+          <li key={index} className="flex items-start gap-3 group">
+            <div className="mt-1 w-1.5 h-1.5 rounded-full bg-rose-500/50 group-hover:bg-rose-400 transition-colors flex-shrink-0" />
+            <span className="text-sm text-rose-100/80 font-normal leading-relaxed group-hover:text-rose-100 transition-colors">
+              {flag}
+            </span>
           </li>
         ))}
       </ul>
-      
+
       {needsExpansion && (
         <button
           onClick={() => setIsExpanded(!isExpanded)}
-          className="mt-3 text-red-600 hover:text-red-800 text-sm font-medium focus:outline-none focus:underline"
+          className="mt-6 flex items-center gap-2 text-xs font-semibold text-rose-400 hover:text-rose-300 transition-colors uppercase tracking-wider"
         >
-          {isExpanded ? `Show Less` : `Show More (${redFlags.length - MAX_VISIBLE} more)`}
+          {isExpanded ? 'Show Less' : `View ${redFlags.length - MAX_VISIBLE} More`}
+          <Icons.ChevronDown className={`w-3 h-3 transform transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
         </button>
       )}
     </div>
