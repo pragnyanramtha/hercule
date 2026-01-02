@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'react';
 import { Icons } from './Icons';
 
 interface TrafficLightProps {
@@ -6,7 +7,33 @@ interface TrafficLightProps {
 
 type TrafficLightColor = 'emerald' | 'amber' | 'rose';
 
+function useCountUp(end: number, duration: number = 1000) {
+  const [count, setCount] = useState(0);
+
+  useEffect(() => {
+    let startTime: number | null = null;
+    const animate = (currentTime: number) => {
+      if (!startTime) startTime = currentTime;
+      const progress = Math.min((currentTime - startTime) / duration, 1);
+
+      // Easing function (easeOutExpo)
+      const ease = progress === 1 ? 1 : 1 - Math.pow(2, -10 * progress);
+
+      setCount(Math.floor(ease * end));
+
+      if (progress < 1) {
+        requestAnimationFrame(animate);
+      }
+    };
+    requestAnimationFrame(animate);
+  }, [end, duration]);
+
+  return count;
+}
+
 function TrafficLight({ score }: TrafficLightProps) {
+  const animatedScore = useCountUp(score);
+
   const getColor = (score: number): TrafficLightColor => {
     if (score >= 80) return 'emerald';
     if (score >= 50) return 'amber';
@@ -16,75 +43,70 @@ function TrafficLight({ score }: TrafficLightProps) {
   const color = getColor(score);
 
   const colors = {
-    emerald: { text: 'text-emerald-400', stroke: 'stroke-emerald-500', glow: 'shadow-emerald-500/30' },
-    amber: { text: 'text-amber-400', stroke: 'stroke-amber-500', glow: 'shadow-amber-500/30' },
-    rose: { text: 'text-rose-400', stroke: 'stroke-rose-500', glow: 'shadow-rose-500/30' }
+    emerald: { text: 'text-emerald-400', stroke: 'stroke-emerald-500', bg: 'bg-emerald-500/10' },
+    amber: { text: 'text-amber-400', stroke: 'stroke-amber-500', bg: 'bg-amber-500/10' },
+    rose: { text: 'text-rose-400', stroke: 'stroke-rose-500', bg: 'bg-rose-500/10' }
   };
 
   const theme = colors[color];
-  const radius = 58;
-  const stroke = 8;
-  const normalizedRadius = radius - stroke * 2;
-  const circumference = normalizedRadius * 2 * Math.PI;
-  const strokeDashoffset = circumference - (score / 100) * circumference;
+
+  // Dimensions
+  const size = 180;
+  const strokeWidth = 10;
+  const radius = (size - strokeWidth) / 2;
+  const circumference = radius * 2 * Math.PI;
+  const strokeDashoffset = circumference - (animatedScore / 100) * circumference;
 
   return (
-    <div className={`flex flex-col items-center justify-center py-6`}>
+    <div className="flex flex-col items-center justify-center py-4 animate-fade-in-scale">
       <div className="relative flex items-center justify-center">
-        {/* Glow Container */}
-        <div className={`absolute inset-0 rounded-full blur-3xl opacity-20 bg-current transition-colors duration-700 ${theme.text}`}></div>
+        {/* Glow Background */}
+        <div className={`absolute inset-0 rounded-full blur-3xl opacity-20 ${theme.text}`}></div>
 
-        {/* SVG Gauge */}
         <svg
-          height={radius * 2}
-          width={radius * 2}
-          className="transform -rotate-90 drop-shadow-xl"
+          height={size}
+          width={size}
+          className="transform -rotate-90 drop-shadow-2xl"
         >
-          <defs>
-            <linearGradient id="gradient" x1="0%" y1="0%" x2="100%" y2="0%">
-              <stop offset="0%" stopColor="currentColor" className="text-slate-700" stopOpacity="0.2" />
-              <stop offset="100%" stopColor="currentColor" className={theme.text} />
-            </linearGradient>
-          </defs>
+          {/* Background Track */}
           <circle
             stroke="currentColor"
             fill="transparent"
-            strokeWidth={stroke}
-            strokeDasharray={circumference + ' ' + circumference}
-            style={{ strokeDashoffset: 0 }}
-            r={normalizedRadius}
-            cx={radius}
-            cy={radius}
-            className="text-slate-800/50"
+            strokeWidth={strokeWidth}
+            r={radius}
+            cx={size / 2}
+            cy={size / 2}
+            className="text-slate-800"
           />
+          {/* Progress Arc */}
           <circle
             stroke="currentColor"
             fill="transparent"
-            strokeWidth={stroke}
-            strokeDasharray={circumference + ' ' + circumference}
-            style={{ strokeDashoffset }}
+            strokeWidth={strokeWidth}
+            strokeDasharray={circumference}
+            strokeDashoffset={strokeDashoffset}
             strokeLinecap="round"
-            r={normalizedRadius}
-            cx={radius}
-            cy={radius}
-            className={`${theme.text} transition-all duration-1000 ease-out`}
+            r={radius}
+            cx={size / 2}
+            cy={size / 2}
+            className={`${theme.stroke} transition-all duration-100 ease-out`}
           />
         </svg>
 
-        {/* Center Content */}
-        <div className="absolute inset-0 flex flex-col items-center justify-center">
-          <span className={`text-5xl font-bold tracking-tighter transition-colors duration-500 ${theme.text}`}>
-            {score}
+        {/* Center Text */}
+        <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+          <span className={`text-6xl font-bold tracking-tighter tabular-nums ${theme.text}`}>
+            {animatedScore}
           </span>
-          <span className="text-[10px] uppercase tracking-[0.2em] text-slate-400 font-semibold mt-1">
+          <span className="text-xs uppercase tracking-[0.25em] text-slate-400/80 font-medium mt-1">
             Score
           </span>
         </div>
       </div>
 
-      <div className="mt-4 flex items-center gap-2 px-4 py-1.5 rounded-full bg-slate-900/50 border border-slate-800 backdrop-blur-md">
-        <Icons.Shield className={`w-3 h-3 ${theme.text}`} />
-        <span className="text-xs font-medium text-slate-300">
+      <div className={`mt-6 flex items-center gap-2 px-5 py-2 rounded-full border border-slate-800/60 backdrop-blur-md transition-colors duration-500 ${theme.bg}`}>
+        <Icons.Shield className={`w-4 h-4 ${theme.text}`} />
+        <span className="text-sm font-medium text-slate-200">
           {score >= 80 ? 'Excellent Protection' : score >= 50 ? 'Moderate Risks' : 'High Risk Profile'}
         </span>
       </div>
