@@ -158,31 +158,33 @@ function AppContent() {
 
       <main className="p-6">
         {loading.isLoading && (
-          <div className="flex flex-col items-center justify-center py-20 animate-in fade-in duration-500">
+          <div className="flex flex-col items-center justify-center py-20 animate-fade-in-scale">
             <div className="relative mb-10">
-              <div className="absolute inset-0 rounded-full blur-2xl bg-indigo-500/20 animate-pulse"></div>
+              <div className={`absolute inset-0 rounded-full blur-2xl transition-colors duration-1000 ${componentLoading.analysis ? 'bg-emerald-500/20' : 'bg-indigo-500/20'} animate-pulse`}></div>
               <div className="w-16 h-16 relative">
                 <div className="absolute inset-0 border-4 border-slate-800/50 rounded-full"></div>
-                <div className="absolute inset-0 border-4 border-t-indigo-500 border-r-transparent border-b-transparent border-l-transparent rounded-full animate-spin"></div>
+                <div className={`absolute inset-0 border-4 border-t-current border-r-transparent border-b-transparent border-l-transparent rounded-full animate-spin transition-colors duration-1000 ${componentLoading.analysis ? 'text-emerald-400' : 'text-indigo-500'}`}></div>
               </div>
             </div>
 
-            <p className="text-slate-200 font-medium text-base mb-2">{loading.message}</p>
+            <p key={loading.message} className="text-slate-200 font-medium text-base mb-2 animate-fade-in-scale h-6">
+              {loading.message}
+            </p>
 
             <div className="flex items-center gap-4 mt-8 w-full max-w-[200px]">
               <div className="flex-1 h-1 bg-slate-800 rounded-full overflow-hidden">
-                <div className={`h-full bg-indigo-500 transition-all duration-1000 ${componentLoading.extraction ? 'w-1/2' : 'w-full'}`}></div>
+                <div className={`h-full transition-all duration-1000 ease-out ${componentLoading.analysis ? 'bg-emerald-400 w-full' : 'bg-indigo-500 w-1/2'}`}></div>
               </div>
             </div>
             <div className="flex justify-between w-full max-w-[200px] mt-2 text-[10px] uppercase tracking-wider text-slate-500 font-semibold">
-              <span className={componentLoading.extraction ? 'text-indigo-400' : 'text-emerald-400'}>Extract</span>
-              <span className={componentLoading.analysis ? 'text-indigo-400' : (result ? 'text-emerald-400' : 'text-slate-600')}>Analyze</span>
+              <span className={`transition-colors duration-500 ${!componentLoading.analysis ? 'text-indigo-400' : 'text-slate-600'}`}>Extract</span>
+              <span className={`transition-colors duration-500 ${componentLoading.analysis ? 'text-emerald-400' : 'text-slate-600'}`}>Analyze</span>
             </div>
           </div>
         )}
 
         {error && !loading.isLoading && (
-          <div className="bg-rose-950/20 border border-rose-500/20 p-8 rounded-3xl text-center backdrop-blur-sm">
+          <div className="bg-rose-950/20 border border-rose-500/20 p-8 rounded-3xl text-center backdrop-blur-sm animate-slide-up">
             <div className="inline-flex p-4 rounded-full bg-rose-500/10 mb-6 ring-1 ring-rose-500/20">
               <Icons.Alert className="w-8 h-8 text-rose-500" />
             </div>
@@ -190,28 +192,40 @@ function AppContent() {
             <p className="text-rose-200/70 text-sm mb-8 max-w-xs mx-auto leading-relaxed">{error}</p>
             <button
               onClick={analyzePolicyFromCurrentPage}
-              className="px-6 py-3 bg-gradient-to-r from-rose-600 to-rose-700 hover:from-rose-500 hover:to-rose-600 text-white rounded-xl shadow-lg shadow-rose-900/40 transition-all active:scale-95 font-medium text-sm flex items-center justify-center gap-2 mx-auto w-full"
+              className="px-6 py-3 bg-gradient-to-r from-rose-600 to-rose-700 hover:from-rose-500 hover:to-rose-600 text-white rounded-xl shadow-lg shadow-rose-900/40 transition-all active:scale-95 font-medium text-sm flex items-center justify-center gap-2 mx-auto w-full group"
             >
-              <span className="text-lg">↻</span> Retry Analysis
+              <span className="text-lg group-hover:rotate-180 transition-transform duration-500">↻</span> Retry Analysis
             </button>
           </div>
         )}
 
         {result && !loading.isLoading && (
-          <div className="space-y-6 animate-in slide-in-from-bottom-4 duration-700">
+          <div className="space-y-6">
             <ErrorBoundary>
-              <div className="bg-slate-900/40 border border-slate-800/60 rounded-[32px] p-8 flex flex-col items-center backdrop-blur-sm shadow-2xl shadow-indigo-500/5">
+              <div className="bg-slate-900/40 border border-slate-800/60 rounded-[32px] p-8 flex flex-col items-center backdrop-blur-sm shadow-2xl shadow-indigo-500/5 animate-slide-up">
                 <TrafficLight score={result.score} />
               </div>
             </ErrorBoundary>
 
             <div className="grid gap-5">
-              <ErrorBoundary><Summary summary={result.summary} /></ErrorBoundary>
-              <ErrorBoundary><RedFlags redFlags={result.red_flags} /></ErrorBoundary>
-              <ErrorBoundary><ActionItems actionItems={result.user_action_items} /></ErrorBoundary>
+              <ErrorBoundary>
+                <div className="animate-slide-up delay-150">
+                  <Summary summary={result.summary} />
+                </div>
+              </ErrorBoundary>
+              <ErrorBoundary>
+                <div className="animate-slide-up delay-300">
+                  <RedFlags redFlags={result.red_flags} />
+                </div>
+              </ErrorBoundary>
+              <ErrorBoundary>
+                <div className="animate-slide-up delay-500">
+                  <ActionItems actionItems={result.user_action_items} />
+                </div>
+              </ErrorBoundary>
             </div>
 
-            <footer className="flex items-center justify-center gap-2 pt-8 pb-4 opacity-50 hover:opacity-100 transition-opacity">
+            <footer className="flex items-center justify-center gap-2 pt-8 pb-4 opacity-0 animate-slide-up delay-500" style={{ animationFillMode: 'forwards' }}>
               <div className="w-1 h-1 rounded-full bg-slate-500"></div>
               <p className="text-[10px] text-slate-500 uppercase tracking-widest font-semibold">Protected by Hercule Engine</p>
             </footer>
