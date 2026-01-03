@@ -252,7 +252,11 @@ class DiscoveryService:
     async def _duckduckgo_search(self, domain: str) -> DiscoveryResult:
         """Search DuckDuckGo for the privacy policy and fetch the result."""
         try:
-            from duckduckgo_search import DDGS
+            # Try new package name first, fall back to old
+            try:
+                from ddgs import DDGS
+            except ImportError:
+                from duckduckgo_search import DDGS
             
             def search_sync():
                 query = f"site:{domain} privacy policy"

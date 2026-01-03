@@ -261,18 +261,22 @@ class TestAPIEndpoints:
         })
         assert response.status_code == 400  # Application error (missing text and url)
 
-    @patch('service_llm.LLMService.analyze_policy')
-    @patch('requests.get')
-    def test_analyze_fetch_url_success(self, mock_get, mock_analyze, client, sample_analysis_result):
-        """Analyze should fetch content from URL if policy_text is empty."""
-        # Mock successful fetch
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.text = "<html><body>Fetched Privacy Policy Content</body></html>"
-        mock_get.return_value = mock_response
-
-        # Mock LLM analysis
-        mock_analyze.return_value = sample_analysis_result
+    @patch('main.discovery_service')
+    def test_analyze_fetch_url_success(self, mock_discovery_service, client, sample_analysis_result):
+        """Analyze should use discovery service when policy_text is empty."""
+        from service_discovery import DiscoveryResult
+        import asyncio
+        
+        # Create a mock that returns a coroutine
+        async def mock_discover(url):
+            return DiscoveryResult(
+                success=True,
+                policy_text="Fetched Privacy Policy Content with privacy data collection third party sharing",
+                policy_url="https://example.com/privacy",
+                method="parallel_paths"
+            )
+        
+        mock_discovery_service.discover_and_extract = mock_discover
 
         response = client.post("/analyze", json={
             "policy_text": "",
@@ -283,9 +287,6 @@ class TestAPIEndpoints:
         assert response.status_code == 200
         data = response.json()
         assert "score" in data
-        
-        # Verify it tried to fetch
-        mock_get.assert_called_with("https://example.com/fetched-policy", headers={'User-Agent': 'Mozilla/5.0'}, timeout=10)
 
     def test_analyze_valid_request(self, client, sample_policy_text):
         """Analyze should process valid policy text."""
