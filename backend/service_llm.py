@@ -1,54 +1,39 @@
+"""
+LLM Service for privacy policy analysis using Groq API.
+"""
 import os
 import json
 import logging
 import time
 from typing import Dict, Any
-from openai import AzureOpenAI
 from groq import Groq
 from models import AnalysisResult, ActionItem
 from datetime import datetime, timezone
 
-logger = logging.getLogger("privacy-api.llm")
+logger = logging.getLogger("hercule-api.llm")
 
 
 class LLMService:
-    """Service for analyzing privacy policies using Azure OpenAI or Groq (dev mode)."""
+    """Service for analyzing privacy policies using Groq API."""
 
     def __init__(self):
         """Initialize LLM client with environment variables."""
-        # Check for dev mode (Groq API)
-        self.dev_mode = os.getenv("DEV_MODE", "").lower() == "true"
         self.groq_api_key = os.getenv("GROQ_API_KEY")
-        self.azure_api_key = os.getenv("AZURE_OPENAI_KEY")
 
-        # Determine which mode to use
-        if self.dev_mode and self.groq_api_key:
-            # Dev mode: Use Groq API
+        if self.groq_api_key:
             self.test_mode = False
             self.provider = "groq"
             self.client = Groq(api_key=self.groq_api_key)
-            self.deployment = os.getenv("GROQ_MODEL", "moonshotai/kimi-k2-instruct-0905")
-            logger.info("🚀 Running in DEV MODE - using Groq API")
+            self.deployment = os.getenv("GROQ_MODEL", "llama-3.1-70b-versatile")
+            logger.info("🚀 Using Groq API")
             logger.info(f"   Model: {self.deployment}")
-        elif self.azure_api_key:
-            # Production mode: Use Azure OpenAI
-            self.test_mode = False
-            self.provider = "azure"
-            self.client = AzureOpenAI(
-                api_key=self.azure_api_key,
-                api_version="2024-02-15-preview",
-                azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT")
-            )
-            self.deployment = os.getenv("AZURE_OPENAI_DEPLOYMENT", "gpt-4")
-            logger.info("🔵 Running in PRODUCTION MODE - using Azure OpenAI")
-            logger.info(f"   Deployment: {self.deployment}")
         else:
-            # Test mode: No API keys provided
+            # Test mode: No API key provided
             self.test_mode = True
             self.provider = "mock"
             self.client = None
             self.deployment = "mock_model"
-            logger.warning("⚠️  Running in TEST MODE - using mock LLM responses")
+            logger.warning("⚠️  Running in TEST MODE - using mock LLM responses (set GROQ_API_KEY to enable)")
 
     def _build_system_prompt(self) -> str:
         """Constructs the Privacy Lawyer Agent system prompt."""
@@ -83,7 +68,7 @@ Return ONLY the JSON object, no additional text."""
 
     def _generate_mock_analysis(self, policy_text: str, url: str) -> AnalysisResult:
         """
-        Generate mock analysis for testing without Azure OpenAI.
+        Generate mock analysis for testing without API key.
 
         Args:
             policy_text: The privacy policy text
@@ -189,7 +174,7 @@ Return ONLY the JSON object, no additional text."""
 
     def analyze_policy(self, policy_text: str, url: str) -> AnalysisResult:
         """
-        Sends policy text to LLM (Azure OpenAI or Groq) and returns structured analysis.
+        Sends policy text to Groq LLM and returns structured analysis.
 
         Args:
             policy_text: The privacy policy text to analyze (max 50,000 chars)
@@ -216,33 +201,19 @@ Return ONLY the JSON object, no additional text."""
             logger.debug(f"📄 Policy text length: {original_length:,} chars")
 
         try:
-            logger.debug(f"Calling {self.provider} API with model: {self.deployment}")
+            logger.debug(f"Calling Groq API with model: {self.deployment}")
             start_time = time.time()
 
-            if self.provider == "groq":
-                # Groq API call
-                response = self.client.chat.completions.create(
-                    model=self.deployment,
-                    messages=[
-                        {"role": "system", "content": self._build_system_prompt()},
-                        {"role": "user", "content": f"Analyze this privacy policy:\n\n{truncated_text}"}
-                    ],
-                    temperature=0.3,
-                    max_tokens=2000,
-                    response_format={"type": "json_object"}
-                )
-            else:
-                # Azure OpenAI API call
-                response = self.client.chat.completions.create(
-                    model=self.deployment,
-                    messages=[
-                        {"role": "system", "content": self._build_system_prompt()},
-                        {"role": "user", "content": f"Analyze this privacy policy:\n\n{truncated_text}"}
-                    ],
-                    temperature=0.3,
-                    max_tokens=2000,
-                    response_format={"type": "json_object"}
-                )
+            response = self.client.chat.completions.create(
+                model=self.deployment,
+                messages=[
+                    {"role": "system", "content": self._build_system_prompt()},
+                    {"role": "user", "content": f"Analyze this privacy policy:\n\n{truncated_text}"}
+                ],
+                temperature=0.3,
+                max_tokens=2000,
+                response_format={"type": "json_object"}
+            )
 
             # Parse the response
             api_duration = (time.time() - start_time) * 1000

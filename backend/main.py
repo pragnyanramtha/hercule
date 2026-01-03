@@ -1,6 +1,6 @@
 """
 Hercule API
-FastAPI backend for analyzing privacy policies using Azure OpenAI or Groq.
+FastAPI backend for analyzing privacy policies using Groq LLM.
 """
 import os
 import logging
@@ -92,7 +92,6 @@ class HealthResponse(BaseModel):
     test_mode: bool
     provider: str
     model: Optional[str] = None
-    dev_mode: bool
 
 
 @app.get("/health", response_model=HealthResponse)
@@ -104,8 +103,7 @@ async def health_check():
         cache_size=cache_manager.size(),
         test_mode=llm_service.test_mode,
         provider=llm_service.provider,
-        model=llm_service.deployment,
-        dev_mode=getattr(llm_service, 'dev_mode', False)
+        model=llm_service.deployment
     )
 
 
