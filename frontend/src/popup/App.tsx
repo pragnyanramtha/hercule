@@ -15,12 +15,13 @@ interface LoadingState {
 
 interface ComponentLoadingState {
   extraction: boolean;
+  discovery: boolean;
   analysis: boolean;
 }
 
 function AppContent() {
   const [loading, setLoading] = useState<LoadingState>({ isLoading: true, message: 'Extracting policy text...' });
-  const [componentLoading, setComponentLoading] = useState<ComponentLoadingState>({ extraction: true, analysis: false });
+  const [componentLoading, setComponentLoading] = useState<ComponentLoadingState>({ extraction: true, discovery: false, analysis: false });
   const [result, setResult] = useState<AnalysisResult | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -31,7 +32,7 @@ function AppContent() {
   const analyzePolicyFromCurrentPage = async () => {
     try {
       setLoading({ isLoading: true, message: 'Extracting policy text...' });
-      setComponentLoading({ extraction: true, analysis: false });
+      setComponentLoading({ extraction: true, discovery: false, analysis: false });
       setError(null);
 
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -75,12 +76,20 @@ function AppContent() {
         }
       }
 
-      setComponentLoading({ extraction: false, analysis: true });
+      setComponentLoading({ extraction: false, discovery: false, analysis: true });
 
       if (!response.success) {
-        setError(response.error || 'Failed to extract policy text');
-        setLoading({ isLoading: false, message: '' });
-        return;
+          // If extraction failed, try Smart Discovery
+          console.log("Extraction failed, trying Smart Discovery...");
+          await performSmartDiscovery(tab.url || '');
+          return;
+      }
+
+      // Heuristic: If text is very short, it might not be a policy. Try discover.
+      if (response.policyText.length < 500) {
+           console.log("Text too short, might not be policy. Trying Smart Discovery...");
+           await performSmartDiscovery(tab.url || '');
+           return;
       }
 
       setLoading({ isLoading: true, message: 'Analyzing privacy risks (this may take a moment)...' });
@@ -91,6 +100,49 @@ function AppContent() {
       setError('Could not analyze policy. Connection failed.');
       setLoading({ isLoading: false, message: '' });
     }
+  };
+
+  const performSmartDiscovery = async (currentUrl: string) => {
+      try {
+          setLoading({ isLoading: true, message: 'Searching for privacy policy...' });
+          setComponentLoading({ extraction: false, discovery: true, analysis: false });
+          
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 15000); // 15s timeout for discovery
+
+          const response = await fetch(`${config.apiUrl}/discover_policy?url=${encodeURIComponent(currentUrl)}`, {
+              method: 'GET',
+              headers: { 'Content-Type': 'application/json' },
+              signal: controller.signal,
+          });
+          
+          clearTimeout(timeoutId);
+
+          if (!response.ok) {
+              setError('Could not automatically find a privacy policy on this site.');
+              setLoading({ isLoading: false, message: '' });
+              setComponentLoading({ extraction: false, discovery: false, analysis: false });
+              return;
+          }
+
+          const data = await response.json();
+          if (data.policy_url) {
+              setLoading({ isLoading: true, message: `Found policy at ${new URL(data.policy_url).pathname}. Analyzing...` });
+              setComponentLoading({ extraction: false, discovery: false, analysis: true });
+              // Analyze the found URL
+              await analyzePolicy("", data.policy_url);
+          } else {
+               setError('Privacy policy not found.');
+               setLoading({ isLoading: false, message: '' });
+               setComponentLoading({ extraction: false, discovery: false, analysis: false });
+          }
+
+      } catch (err) {
+          console.error('Smart discovery error:', err);
+          setError('Failed to search for privacy policy.');
+          setLoading({ isLoading: false, message: '' });
+          setComponentLoading({ extraction: false, discovery: false, analysis: false });
+      }
   };
 
   const analyzePolicy = async (policyText: string, url: string, retryCount = 0) => {
@@ -115,7 +167,7 @@ function AppContent() {
       const analysisResult: AnalysisResult = await response.json();
       setResult(analysisResult);
       setLoading({ isLoading: false, message: '' });
-      setComponentLoading({ extraction: false, analysis: false });
+      setComponentLoading({ extraction: false, discovery: false, analysis: false });
 
     } catch (err) {
       console.error('Error calling backend:', err);
@@ -132,7 +184,7 @@ function AppContent() {
 
       setError(errorMessage);
       setLoading({ isLoading: false, message: '' });
-      setComponentLoading({ extraction: false, analysis: false });
+      setComponentLoading({ extraction: false, discovery: false, analysis: false });
     }
   };
 
@@ -173,12 +225,13 @@ function AppContent() {
 
             <div className="flex items-center gap-4 mt-8 w-full max-w-[200px]">
               <div className="flex-1 h-1 bg-slate-800 rounded-full overflow-hidden">
-                <div className={`h-full transition-all duration-1000 ease-out ${componentLoading.analysis ? 'bg-emerald-400 w-full' : 'bg-indigo-500 w-1/2'}`}></div>
+                <div className={`h-full transition-all duration-1000 ease-out ${componentLoading.analysis ? 'bg-emerald-400 w-full' : (componentLoading.discovery ? 'bg-indigo-500 w-2/3' : 'bg-indigo-500 w-1/3')}`}></div>
               </div>
             </div>
             <div className="flex justify-between w-full max-w-[200px] mt-2 text-[10px] uppercase tracking-wider text-slate-500 font-semibold">
-              <span className={`transition-colors duration-500 ${!componentLoading.analysis ? 'text-indigo-400' : 'text-slate-600'}`}>Extract</span>
-              <span className={`transition-colors duration-500 ${componentLoading.analysis ? 'text-emerald-400' : 'text-slate-600'}`}>Analyze</span>
+              <span className={`transition-colors duration-500 ${!componentLoading.analysis && !componentLoading.discovery ? 'text-indigo-400' : 'text-emerald-400'}`}>Extract</span>
+              <span className={`transition-colors duration-500 ${componentLoading.discovery ? 'text-indigo-400' : (componentLoading.analysis ? 'text-emerald-400' : 'text-slate-600')}`}>Find</span>
+              <span className={`transition-colors duration-500 ${componentLoading.analysis ? 'text-indigo-400' : (result ? 'text-emerald-400' : 'text-slate-600')}`}>Analyze</span>
             </div>
           </div>
         )}

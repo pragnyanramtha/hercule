@@ -245,21 +245,47 @@ class TestAPIEndpoints:
         assert "timestamp" in data
         assert "cache_size" in data
 
-    def test_analyze_empty_text(self, client):
-        """Analyze should reject empty policy text."""
+    def test_analyze_empty_text_no_url(self, client):
+        """Analyze should reject empty policy text if no URL is provided."""
         response = client.post("/analyze", json={
             "policy_text": "",
-            "url": "https://example.com"
+            "url": ""
         })
-        assert response.status_code == 422  # Validation error
+        assert response.status_code == 400  # Application error (missing text and url)
 
-    def test_analyze_whitespace_only(self, client):
-        """Analyze should reject whitespace-only policy text."""
+    def test_analyze_whitespace_only_no_url(self, client):
+        """Analyze should reject whitespace-only policy text if no URL is provided."""
         response = client.post("/analyze", json={
             "policy_text": "   \n\t  ",
-            "url": "https://example.com"
+            "url": ""
         })
-        assert response.status_code == 422  # Validation error
+        assert response.status_code == 400  # Application error (missing text and url)
+
+    @patch('service_llm.LLMService.analyze_policy')
+    @patch('requests.get')
+    def test_analyze_fetch_url_success(self, mock_get, mock_analyze, client, sample_analysis_result):
+        """Analyze should fetch content from URL if policy_text is empty."""
+        # Mock successful fetch
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.text = "<html><body>Fetched Privacy Policy Content</body></html>"
+        mock_get.return_value = mock_response
+
+        # Mock LLM analysis
+        mock_analyze.return_value = sample_analysis_result
+
+        response = client.post("/analyze", json={
+            "policy_text": "",
+            "url": "https://example.com/fetched-policy"
+        })
+        
+        # Should now process this as valid policy text
+        assert response.status_code == 200
+        data = response.json()
+        assert "score" in data
+        
+        # Verify it tried to fetch
+        mock_get.assert_called_with("https://example.com/fetched-policy", headers={'User-Agent': 'Mozilla/5.0'}, timeout=10)
 
     def test_analyze_valid_request(self, client, sample_policy_text):
         """Analyze should process valid policy text."""

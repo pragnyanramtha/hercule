@@ -19,6 +19,7 @@ __pycache__/
 *.py[cod]
 *$py.class
 *.so
+backend/.pytest_cache
 
 # IDE
 .vscode/
