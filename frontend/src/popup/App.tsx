@@ -78,18 +78,14 @@ function AppContent() {
 
       setComponentLoading({ extraction: false, discovery: false, analysis: true });
 
-      if (!response.success) {
-          // If extraction failed, try Smart Discovery
-          console.log("Extraction failed, trying Smart Discovery...");
-          await performSmartDiscovery(tab.url || '');
-          return;
-      }
+      // Heuristic: If text is very short (< 200 chars) OR extraction failed, assume it's not a policy page.
+      // We automatically trigger Smart Discovery in these cases.
+      const isShortText = response.success && response.policyText && response.policyText.length < 200;
 
-      // Heuristic: If text is very short, it might not be a policy. Try discover.
-      if (response.policyText.length < 500) {
-           console.log("Text too short, might not be policy. Trying Smart Discovery...");
-           await performSmartDiscovery(tab.url || '');
-           return;
+      if (!response.success || isShortText) {
+        console.log("Not a policy page (extraction failed or text too short). Trying Smart Discovery...");
+        await performSmartDiscovery(tab.url || '');
+        return;
       }
 
       setLoading({ isLoading: true, message: 'Analyzing privacy risks (this may take a moment)...' });
@@ -103,46 +99,46 @@ function AppContent() {
   };
 
   const performSmartDiscovery = async (currentUrl: string) => {
-      try {
-          setLoading({ isLoading: true, message: 'Searching for privacy policy...' });
-          setComponentLoading({ extraction: false, discovery: true, analysis: false });
-          
-          const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 15000); // 15s timeout for discovery
+    try {
+      setLoading({ isLoading: true, message: 'Searching for privacy policy...' });
+      setComponentLoading({ extraction: false, discovery: true, analysis: false });
 
-          const response = await fetch(`${config.apiUrl}/discover_policy?url=${encodeURIComponent(currentUrl)}`, {
-              method: 'GET',
-              headers: { 'Content-Type': 'application/json' },
-              signal: controller.signal,
-          });
-          
-          clearTimeout(timeoutId);
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 15000); // 15s timeout for discovery
 
-          if (!response.ok) {
-              setError('Could not automatically find a privacy policy on this site.');
-              setLoading({ isLoading: false, message: '' });
-              setComponentLoading({ extraction: false, discovery: false, analysis: false });
-              return;
-          }
+      const response = await fetch(`${config.apiUrl}/discover_policy?url=${encodeURIComponent(currentUrl)}`, {
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json' },
+        signal: controller.signal,
+      });
 
-          const data = await response.json();
-          if (data.policy_url) {
-              setLoading({ isLoading: true, message: `Found policy at ${new URL(data.policy_url).pathname}. Analyzing...` });
-              setComponentLoading({ extraction: false, discovery: false, analysis: true });
-              // Analyze the found URL
-              await analyzePolicy("", data.policy_url);
-          } else {
-               setError('Privacy policy not found.');
-               setLoading({ isLoading: false, message: '' });
-               setComponentLoading({ extraction: false, discovery: false, analysis: false });
-          }
+      clearTimeout(timeoutId);
 
-      } catch (err) {
-          console.error('Smart discovery error:', err);
-          setError('Failed to search for privacy policy.');
-          setLoading({ isLoading: false, message: '' });
-          setComponentLoading({ extraction: false, discovery: false, analysis: false });
+      if (!response.ok) {
+        setError('Could not automatically find a privacy policy on this site.');
+        setLoading({ isLoading: false, message: '' });
+        setComponentLoading({ extraction: false, discovery: false, analysis: false });
+        return;
       }
+
+      const data = await response.json();
+      if (data.policy_url) {
+        setLoading({ isLoading: true, message: `Found policy at ${new URL(data.policy_url).pathname}. Analyzing...` });
+        setComponentLoading({ extraction: false, discovery: false, analysis: true });
+        // Analyze the found URL
+        await analyzePolicy("", data.policy_url);
+      } else {
+        setError('Privacy policy not found.');
+        setLoading({ isLoading: false, message: '' });
+        setComponentLoading({ extraction: false, discovery: false, analysis: false });
+      }
+
+    } catch (err) {
+      console.error('Smart discovery error:', err);
+      setError('Failed to search for privacy policy.');
+      setLoading({ isLoading: false, message: '' });
+      setComponentLoading({ extraction: false, discovery: false, analysis: false });
+    }
   };
 
   const analyzePolicy = async (policyText: string, url: string, retryCount = 0) => {

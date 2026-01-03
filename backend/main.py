@@ -6,7 +6,7 @@ import os
 import logging
 import time
 from datetime import datetime, timezone
-from typing import List
+from typing import List, Optional
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -106,6 +106,7 @@ class HealthResponse(BaseModel):
     cache_size: int
     test_mode: bool
     provider: str
+    model: Optional[str] = None
     dev_mode: bool
 
 
@@ -117,7 +118,7 @@ async def discover_policy(url: str):
     if not url:
         raise HTTPException(status_code=400, detail="URL is required")
     
-    policy_url = discovery_service.find_policy(url)
+    policy_url = await discovery_service.find_policy(url)
     if not policy_url:
         raise HTTPException(status_code=404, detail="Privacy policy not found")
         
@@ -133,6 +134,7 @@ async def health_check():
         cache_size=cache_manager.size(),
         test_mode=llm_service.test_mode,
         provider=llm_service.provider,
+        model=llm_service.deployment,
         dev_mode=getattr(llm_service, 'dev_mode', False)
     )
 
@@ -153,11 +155,26 @@ async def analyze_policy(request: AnalyzeRequest):
     """
     # Helper to fetch text if missing
     if not request.policy_text and request.url:
-        logger.info(f"🌐 Fetching policy content from: {request.url}")
+        target_url = request.url
+        
+        # Smart Discovery Integration:
+        # If the URL looks like a homepage (no path), try to find the actual policy page first.
+        from urllib.parse import urlparse
+        parsed = urlparse(target_url)
+        if parsed.path in ['', '/', '/index.html']:
+            logger.info(f"🔍 Root URL detected. Attempting Smart Discovery for: {target_url}")
+            discovered_url = await discovery_service.find_policy(target_url)
+            if discovered_url:
+                logger.info(f"✨ Smart Discovery Redirect: {target_url} -> {discovered_url}")
+                target_url = discovered_url
+                # Update the request URL for the final report
+                request.url = discovered_url
+
+        logger.info(f"🌐 Fetching policy content from: {target_url}")
         try:
              # Basic fetch
              import requests
-             resp = requests.get(request.url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=10)
+             resp = requests.get(target_url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=10)
              if resp.status_code == 200:
                  # Extract text using BeautifulSoup
                  from bs4 import BeautifulSoup

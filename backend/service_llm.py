@@ -47,7 +47,7 @@ class LLMService:
             self.test_mode = True
             self.provider = "mock"
             self.client = None
-            self.deployment = None
+            self.deployment = "mock_model"
             logger.warning("⚠️  Running in TEST MODE - using mock LLM responses")
 
     def _build_system_prompt(self) -> str:
