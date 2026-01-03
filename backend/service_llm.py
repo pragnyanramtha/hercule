@@ -13,14 +13,14 @@ logger = logging.getLogger("privacy-api.llm")
 
 class LLMService:
     """Service for analyzing privacy policies using Azure OpenAI or Groq (dev mode)."""
-    
+
     def __init__(self):
         """Initialize LLM client with environment variables."""
         # Check for dev mode (Groq API)
         self.dev_mode = os.getenv("DEV_MODE", "").lower() == "true"
         self.groq_api_key = os.getenv("GROQ_API_KEY")
         self.azure_api_key = os.getenv("AZURE_OPENAI_KEY")
-        
+
         # Determine which mode to use
         if self.dev_mode and self.groq_api_key:
             # Dev mode: Use Groq API
@@ -49,7 +49,7 @@ class LLMService:
             self.client = None
             self.deployment = None
             logger.warning("⚠️  Running in TEST MODE - using mock LLM responses")
-    
+
     def _build_system_prompt(self) -> str:
         """Constructs the Privacy Lawyer Agent system prompt."""
         return """You are a Privacy Lawyer Agent, an expert in analyzing privacy policies and terms of service.
@@ -80,49 +80,49 @@ Scoring guidelines:
 - 0-49: Significant concerns, vague language, extensive data collection/sharing
 
 Return ONLY the JSON object, no additional text."""
-    
+
     def _generate_mock_analysis(self, policy_text: str, url: str) -> AnalysisResult:
         """
         Generate mock analysis for testing without Azure OpenAI.
-        
+
         Args:
             policy_text: The privacy policy text
             url: The URL of the privacy policy
-            
+
         Returns:
             Mock AnalysisResult based on policy text characteristics
         """
         text_lower = policy_text.lower()
         text_length = len(policy_text)
-        
+
         # Analyze text for concerning keywords
         concerning_keywords = [
             'third party', 'third-party', 'share', 'sell', 'indefinitely',
             'arbitration', 'waive', 'biometric', 'tracking', 'surveillance',
             'cannot control', 'may modify', 'without notice'
         ]
-        
+
         positive_keywords = [
             'delete', 'opt out', 'opt-out', 'gdpr', 'ccpa', 'encrypted',
             'never share', 'never sell', 'your rights', 'you can', 'contact us'
         ]
-        
+
         concern_count = sum(1 for keyword in concerning_keywords if keyword in text_lower)
         positive_count = sum(1 for keyword in positive_keywords if keyword in text_lower)
-        
+
         # Calculate score based on characteristics
         base_score = 70
         score = base_score - (concern_count * 5) + (positive_count * 3)
-        
+
         # Adjust for length (very long policies are harder to understand)
         if text_length > 5000:
             score -= 10
         elif text_length < 1000:
             score += 10
-        
+
         # Clamp score to 0-100
         score = max(0, min(100, score))
-        
+
         # Generate summary based on score
         if score >= 80:
             summary = "This privacy policy is relatively user-friendly and transparent. It clearly outlines data collection practices, provides users with control over their information, and demonstrates respect for privacy rights. The policy uses accessible language and offers straightforward options for data management."
@@ -130,7 +130,7 @@ Return ONLY the JSON object, no additional text."""
             summary = "This privacy policy has moderate clarity with some areas of concern. While it outlines basic data practices, there are aspects that could be more transparent. Users should be aware of third-party data sharing and review the specific terms that apply to their usage. Some user rights are provided but may require additional steps to exercise."
         else:
             summary = "This privacy policy raises significant concerns regarding user privacy and data protection. The policy contains vague language, extensive data collection practices, and broad third-party sharing provisions. Users should carefully consider the implications before agreeing to these terms and explore alternative services if privacy is a priority."
-        
+
         # Generate red flags based on concerning keywords found
         red_flags = []
         if 'third party' in text_lower or 'third-party' in text_lower:
@@ -149,7 +149,7 @@ Return ONLY the JSON object, no additional text."""
             red_flags.append("Policy can be changed without user notification")
         if concern_count > 5 and positive_count < 3:
             red_flags.append("Limited user control over personal data")
-        
+
         # Generate action items based on score and content
         action_items = []
         if score < 70:
@@ -177,7 +177,7 @@ Return ONLY the JSON object, no additional text."""
                 text="Exercise your right to delete your data if you no longer use the service",
                 priority="low"
             ))
-        
+
         return AnalysisResult(
             score=score,
             summary=summary,
@@ -186,18 +186,18 @@ Return ONLY the JSON object, no additional text."""
             timestamp=datetime.now(timezone.utc),
             url=url
         )
-    
+
     def analyze_policy(self, policy_text: str, url: str) -> AnalysisResult:
         """
         Sends policy text to LLM (Azure OpenAI or Groq) and returns structured analysis.
-        
+
         Args:
             policy_text: The privacy policy text to analyze (max 50,000 chars)
             url: The URL of the privacy policy
-            
+
         Returns:
             AnalysisResult object with score, summary, red flags, and action items
-            
+
         Raises:
             Exception: If LLM call fails or response is invalid
         """
@@ -205,7 +205,7 @@ Return ONLY the JSON object, no additional text."""
         if self.test_mode:
             logger.debug("Using mock analysis (test mode)")
             return self._generate_mock_analysis(policy_text, url)
-        
+
         # Truncate policy text to 50,000 characters
         original_length = len(policy_text)
         truncated_text = policy_text[:50000]
@@ -214,11 +214,11 @@ Return ONLY the JSON object, no additional text."""
             logger.info(f"📄 Policy text truncated: {original_length:,} → 50,000 chars")
         else:
             logger.debug(f"📄 Policy text length: {original_length:,} chars")
-        
+
         try:
             logger.debug(f"Calling {self.provider} API with model: {self.deployment}")
             start_time = time.time()
-            
+
             if self.provider == "groq":
                 # Groq API call
                 response = self.client.chat.completions.create(
@@ -243,32 +243,32 @@ Return ONLY the JSON object, no additional text."""
                     max_tokens=2000,
                     response_format={"type": "json_object"}
                 )
-            
+
             # Parse the response
             api_duration = (time.time() - start_time) * 1000
             logger.info(f"🤖 LLM API response received in {api_duration:.0f}ms")
-            
+
             content = response.choices[0].message.content
             logger.debug(f"Response content length: {len(content)} chars")
-            
+
             result_dict = json.loads(content)
-            
+
             # Validate response structure
             if not self._validate_response(result_dict):
                 logger.error(f"Invalid LLM response structure. Keys: {list(result_dict.keys())}")
                 raise ValueError("LLM response missing required fields")
-            
+
             # Log analysis results
             score = result_dict["score"]
             num_red_flags = len(result_dict.get("red_flags", []))
             num_actions = len(result_dict.get("user_action_items", []))
             logger.info(f"📊 Analysis results - Score: {score}/100, Red flags: {num_red_flags}, Actions: {num_actions}")
-            
+
             # Convert to AnalysisResult model
             action_items = [
                 ActionItem(**item) for item in result_dict.get("user_action_items", [])
             ]
-            
+
             return AnalysisResult(
                 score=result_dict["score"],
                 summary=result_dict["summary"],
@@ -277,7 +277,7 @@ Return ONLY the JSON object, no additional text."""
                 timestamp=datetime.now(timezone.utc),
                 url=url
             )
-            
+
         except json.JSONDecodeError as e:
             logger.error(f"Failed to parse LLM JSON response: {e}")
             logger.debug(f"Raw response: {content[:500]}...")
@@ -285,14 +285,14 @@ Return ONLY the JSON object, no additional text."""
         except Exception as e:
             logger.error(f"LLM analysis failed: {type(e).__name__}: {e}")
             raise Exception(f"Failed to analyze policy: {str(e)}")
-    
+
     def _validate_response(self, response: Dict[str, Any]) -> bool:
         """
         Validates LLM response contains required fields.
-        
+
         Args:
             response: Dictionary parsed from LLM JSON response
-            
+
         Returns:
             True if response is valid, False otherwise
         """

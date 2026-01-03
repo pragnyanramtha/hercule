@@ -15,6 +15,7 @@ from dotenv import load_dotenv
 
 from models import AnalysisResult
 from service_llm import LLMService
+from service_discovery import DiscoveryService
 from cache import cache_manager
 
 # Load environment variables
@@ -45,25 +46,26 @@ app.add_middleware(
 
 # Initialize LLM service
 llm_service = LLMService()
+discovery_service = DiscoveryService()
 
 
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
     """Middleware to log all incoming requests."""
     start_time = time.time()
-    
+
     # Log incoming request
     logger.info(f"➡️  {request.method} {request.url.path} from {request.client.host if request.client else 'unknown'}")
-    
+
     response = await call_next(request)
-    
+
     # Calculate duration
     duration_ms = (time.time() - start_time) * 1000
-    
+
     # Log response
     status_emoji = "✅" if response.status_code < 400 else "❌"
     logger.info(f"{status_emoji} {request.method} {request.url.path} → {response.status_code} ({duration_ms:.1f}ms)")
-    
+
     return response
 
 
@@ -71,17 +73,22 @@ class AnalyzeRequest(BaseModel):
     """Request model for /analyze endpoint with validation."""
     policy_text: str
     url: str = ""
-    
+
     @field_validator('policy_text')
     @classmethod
-    def validate_policy_text(cls, v: str) -> str:
-        """Validate policy_text is not empty or whitespace-only."""
-        if not v or not v.strip():
-            raise ValueError('policy_text cannot be empty or whitespace-only')
-        # Basic sanitization - remove null bytes
-        sanitized = v.replace('\x00', '')
-        return sanitized
-    
+    def validate_policy_text(cls, v: str, info) -> str:
+        """Validate policy_text is not empty or whitespace-only, UNLESS url is provided."""
+        # Note: We can't easily access other fields in field_validator in v2 without model_validator
+        # But we can allow empty here and check model consistency later or just allow empty strings
+        # and handle in the endpoint.
+        if v and not v.strip():
+             # If provided but whitespace
+             return v.strip()
+        # Basic sanitization
+        if v:
+            return v.replace('\x00', '')
+        return v or ""
+
     @field_validator('url')
     @classmethod
     def validate_url(cls, v: str) -> str:
@@ -102,6 +109,21 @@ class HealthResponse(BaseModel):
     dev_mode: bool
 
 
+@app.get("/discover_policy")
+async def discover_policy(url: str):
+    """
+    Attempt to find the privacy policy URL for a given website URL.
+    """
+    if not url:
+        raise HTTPException(status_code=400, detail="URL is required")
+    
+    policy_url = discovery_service.find_policy(url)
+    if not policy_url:
+        raise HTTPException(status_code=404, detail="Privacy policy not found")
+        
+    return {"policy_url": policy_url}
+
+
 @app.get("/health", response_model=HealthResponse)
 async def health_check():
     """Health check endpoint with cache and service status."""
@@ -119,31 +141,55 @@ async def health_check():
 async def analyze_policy(request: AnalyzeRequest):
     """
     Analyze a privacy policy and return structured insights.
-    
+
     Args:
         request: AnalyzeRequest containing policy_text and optional url
-        
+
     Returns:
         AnalysisResult with score, summary, red flags, and action items
-        
+
     Raises:
         HTTPException: 400 if validation fails, 500 if analysis fails
     """
+    # Helper to fetch text if missing
+    if not request.policy_text and request.url:
+        logger.info(f"🌐 Fetching policy content from: {request.url}")
+        try:
+             # Basic fetch
+             import requests
+             resp = requests.get(request.url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=10)
+             if resp.status_code == 200:
+                 # Extract text using BeautifulSoup
+                 from bs4 import BeautifulSoup
+                 soup = BeautifulSoup(resp.text, 'html.parser')
+                 # Remove script and style elements
+                 for script in soup(["script", "style"]):
+                     script.decompose()
+                 request.policy_text = soup.get_text(separator=' ', strip=True)
+             else:
+                 raise HTTPException(status_code=400, detail=f"Failed to fetch URL: {resp.status_code}")
+        except Exception as e:
+            logger.error(f"Error fetching URL: {e}")
+            raise HTTPException(status_code=400, detail=f"Error fetching URL: {str(e)}")
+
+    if not request.policy_text:
+        raise HTTPException(status_code=400, detail="Policy text is required or could not be fetched from URL")
+
     # Generate cache key from policy text
     text_hash = cache_manager.generate_key(request.policy_text)
     policy_preview = request.policy_text[:100].replace('\n', ' ')[:50] + "..."
-    
+
     logger.debug(f"Policy preview: {policy_preview}")
     logger.info(f"📝 Analyzing policy from URL: {request.url or 'N/A'} (hash: {text_hash[:12]}...)")
-    
+
     # Check cache first
     cached_result = cache_manager.get(text_hash)
     if cached_result is not None:
         logger.info(f"💾 Cache HIT - returning cached result (score: {cached_result.score})")
         return cached_result
-    
+
     logger.info(f"🔍 Cache MISS - calling {llm_service.provider.upper()} LLM...")
-    
+
     # Cache miss - call LLM service
     start_time = time.time()
     try:
@@ -162,11 +208,11 @@ async def analyze_policy(request: AnalyzeRequest):
             status_code=500,
             detail=f"Failed to analyze policy: {type(e).__name__}"
         )
-    
+
     # Store result in cache
     cache_manager.set(text_hash, result)
     logger.debug(f"💾 Result cached (cache size: {cache_manager.size()})")
-    
+
     return result
 
 

@@ -3,12 +3,12 @@
  * Ensures type contracts are correct and type guards work properly
  */
 import { describe, it, expect } from 'vitest';
-import type { 
-  ActionItem, 
-  AnalysisResult, 
-  AnalyzeRequest, 
-  HealthResponse, 
-  Priority 
+import type {
+  ActionItem,
+  AnalysisResult,
+  AnalyzeRequest,
+  HealthResponse,
+  Priority
 } from '../../../shared/types';
 
 // Type guard functions for runtime validation

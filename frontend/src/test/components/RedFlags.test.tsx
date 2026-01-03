@@ -57,34 +57,34 @@ describe('RedFlags', () => {
 
     it('should expand to show all flags when button clicked', () => {
       render(<RedFlags redFlags={manyFlags} />);
-      
+
       fireEvent.click(screen.getByText('Show More (3 more)'));
-      
+
       expect(screen.getByText(/Red Flag 6/)).toBeInTheDocument();
       expect(screen.getByText(/Red Flag 8/)).toBeInTheDocument();
     });
 
     it('should show "Show Less" after expansion', () => {
       render(<RedFlags redFlags={manyFlags} />);
-      
+
       fireEvent.click(screen.getByText('Show More (3 more)'));
-      
+
       expect(screen.getByText('Show Less')).toBeInTheDocument();
     });
 
     it('should collapse when "Show Less" is clicked', () => {
       render(<RedFlags redFlags={manyFlags} />);
-      
+
       fireEvent.click(screen.getByText('Show More (3 more)'));
       fireEvent.click(screen.getByText('Show Less'));
-      
+
       expect(screen.queryByText(/Red Flag 6/)).not.toBeInTheDocument();
     });
 
     it('should not show expansion button for 5 or fewer flags', () => {
       const fiveFlags = Array.from({ length: 5 }, (_, i) => `Flag ${i + 1}`);
       render(<RedFlags redFlags={fiveFlags} />);
-      
+
       expect(screen.queryByText(/Show More/)).not.toBeInTheDocument();
     });
   });

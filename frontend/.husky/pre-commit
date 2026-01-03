@@ -43,7 +43,7 @@ if [ -n "$FRONTEND_CHANGED" ]; then
   echo ""
   echo "🧪 Running frontend tests (vitest)..."
   cd extension
-  
+
   # Type check first
   echo "📝 Type checking..."
   npm run type-check
@@ -52,7 +52,7 @@ if [ -n "$FRONTEND_CHANGED" ]; then
     TESTS_FAILED=1
   else
     echo "✅ Type check passed"
-    
+
     # Run tests
     npm run test:run
     if [ $? -ne 0 ]; then

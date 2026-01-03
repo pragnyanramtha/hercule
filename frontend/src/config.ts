@@ -9,12 +9,12 @@ export const config = {
    * Set VITE_API_URL environment variable for production builds
    */
   apiUrl: import.meta.env.VITE_API_URL || 'http://localhost:8000',
-  
+
   /**
    * Request timeout in milliseconds
    */
   requestTimeout: 30000,
-  
+
   /**
    * Maximum retries for failed requests
    */

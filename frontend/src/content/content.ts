@@ -43,7 +43,7 @@ function scanForPrivacyLinks(): PrivacyLinks {
       const linkText = link.textContent?.toLowerCase() || '';
       const href = link.getAttribute('href');
 
-      const hasKeyword = PRIVACY_KEYWORDS.some(keyword => 
+      const hasKeyword = PRIVACY_KEYWORDS.some(keyword =>
         linkText.includes(keyword)
       );
 
@@ -57,7 +57,7 @@ function scanForPrivacyLinks(): PrivacyLinks {
       }
     });
 
-    chrome.storage.local.set({ 
+    chrome.storage.local.set({
       privacyLinks: matchingUrls,
       lastScanned: new Date().toISOString()
     });
@@ -75,11 +75,11 @@ function scanForPrivacyLinks(): PrivacyLinks {
 function extractPolicyText(): string {
   try {
     const text = document.body.innerText || '';
-    
+
     if (text.length > MAX_TEXT_LENGTH) {
       return text.substring(0, MAX_TEXT_LENGTH) + '\n\n[Text truncated at 50,000 characters]';
     }
-    
+
     return text;
   } catch (error) {
     console.error('Error extracting policy text:', error);
@@ -101,28 +101,28 @@ async function fetchPolicyFromUrl(url: string, retryCount = 0): Promise<Extracte
     if (!response.ok) {
       throw new Error(`Failed to fetch policy: ${response.status}`);
     }
-    
+
     const html = await response.text();
     const parser = new DOMParser();
     const doc = parser.parseFromString(html, 'text/html');
     const text = doc.body.innerText || '';
-    
-    const finalText = text.length > MAX_TEXT_LENGTH 
+
+    const finalText = text.length > MAX_TEXT_LENGTH
       ? text.substring(0, MAX_TEXT_LENGTH) + '\n\n[Text truncated at 50,000 characters]'
       : text;
-    
+
     return { success: true, policyText: finalText, policyUrl: url };
-    
+
   } catch (error) {
     console.error(`Error fetching policy (attempt ${retryCount + 1}):`, error);
-    
+
     // Retry logic
     if (retryCount < MAX_RETRIES) {
       console.log(`Retrying fetch... attempt ${retryCount + 2}`);
       await delay(RETRY_DELAY * (retryCount + 1));
       return fetchPolicyFromUrl(url, retryCount + 1);
     }
-    
+
     return {
       success: false,
       error: error instanceof Error ? error.message : 'Failed to fetch policy'
@@ -139,7 +139,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       if (message.action === 'scanLinks') {
         const links = scanForPrivacyLinks();
         sendResponse({ success: true, links: links.urls, found: links.found });
-        
+
       } else if (message.action === 'extractCurrentPage') {
         try {
           const text = extractPolicyText();
@@ -147,7 +147,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         } catch (error) {
           sendResponse({ success: false, error: 'Failed to extract text from current page' });
         }
-        
+
       } else if (message.action === 'extractFromUrl') {
         if (!message.url) {
           sendResponse({ success: false, error: 'No URL provided' });
@@ -155,7 +155,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         }
         const result = await fetchPolicyFromUrl(message.url);
         sendResponse(result);
-        
+
       } else if (message.action === 'getLinks') {
         const data = await chrome.storage.local.get(['privacyLinks']);
         sendResponse({ success: true, links: data.privacyLinks || [] });
@@ -168,7 +168,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       });
     }
   })();
-  
+
   return true;
 });
 
@@ -179,7 +179,7 @@ if (document.readyState === 'loading') {
   scanForPrivacyLinks();
 }
 
-chrome.storage.local.set({ 
+chrome.storage.local.set({
   scanComplete: true,
   scanTimestamp: new Date().toISOString()
 });

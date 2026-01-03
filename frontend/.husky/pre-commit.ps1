@@ -19,7 +19,7 @@ if ($backendChanged) {
     $backendChanged | ForEach-Object { Write-Host "   $_" }
     Write-Host ""
     Write-Host "🐍 Running backend tests (pytest)..." -ForegroundColor Cyan
-    
+
     Push-Location backend
     & python -m pytest test_backend.py -v --tb=short
     if ($LASTEXITCODE -ne 0) {
@@ -40,9 +40,9 @@ if ($frontendChanged) {
     $frontendChanged | ForEach-Object { Write-Host "   $_" }
     Write-Host ""
     Write-Host "🧪 Running frontend tests (vitest)..." -ForegroundColor Cyan
-    
+
     Push-Location extension
-    
+
     # Type check first
     Write-Host "📝 Type checking..." -ForegroundColor Cyan
     & npm run type-check
@@ -51,7 +51,7 @@ if ($frontendChanged) {
         $testsFailed = $true
     } else {
         Write-Host "✅ Type check passed" -ForegroundColor Green
-        
+
         # Run tests
         & npm run test:run
         if ($LASTEXITCODE -ne 0) {

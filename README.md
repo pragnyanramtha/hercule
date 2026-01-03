@@ -218,4 +218,3 @@ For issues and questions, please open an issue on GitHub.
 - pragnyanramtha
 
 open a pull request and become a contributer !
-

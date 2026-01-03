@@ -37,27 +37,27 @@ describe('Summary', () => {
 
     it('should expand when "Read More" is clicked', () => {
       render(<Summary summary={longSummary} />);
-      
+
       fireEvent.click(screen.getByText('Read More'));
-      
+
       // Full text should be shown (no ellipsis)
       expect(screen.getByText(longSummary)).toBeInTheDocument();
     });
 
     it('should show "Show Less" after expansion', () => {
       render(<Summary summary={longSummary} />);
-      
+
       fireEvent.click(screen.getByText('Read More'));
-      
+
       expect(screen.getByText('Show Less')).toBeInTheDocument();
     });
 
     it('should collapse when "Show Less" is clicked', () => {
       render(<Summary summary={longSummary} />);
-      
+
       fireEvent.click(screen.getByText('Read More'));
       fireEvent.click(screen.getByText('Show Less'));
-      
+
       expect(screen.getByText('Read More')).toBeInTheDocument();
     });
   });
