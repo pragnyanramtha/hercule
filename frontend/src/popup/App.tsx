@@ -148,7 +148,7 @@ function AppContent() {
             </div>
           </div>
           <h1 className="text-xl font-bold bg-gradient-to-r from-white via-indigo-100 to-indigo-200 bg-clip-text text-transparent tracking-tight">
-            PrivacyGuard
+            Hercule
           </h1>
         </div>
         <div className="px-2 py-0.5 rounded-full bg-slate-800/50 border border-slate-700/50">

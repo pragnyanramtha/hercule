@@ -14,7 +14,7 @@
     "test:all": "npm run test:run && npm run test:backend",
     "lint": "eslint src --ext .ts,.tsx",
     "type-check": "tsc --noEmit",
-    "prepare": "cd .. && husky install extension/.husky"
+    "prepare": "cd .. && husky install frontend/.husky"
   },
   "dependencies": {
     "react": "^18.2.0",

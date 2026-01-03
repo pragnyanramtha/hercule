@@ -68,7 +68,7 @@ uvicorn main:app --reload --port 8000
 
 **Terminal 2 - Extension Build:**
 ```bash
-cd extension
+cd frontend
 npm run dev
 ```
 
@@ -126,17 +126,17 @@ pytest
 
 ### Extension Development
 
-The extension builds to `extension/dist/` with hot-reload.
+The extension builds to `frontend/dist/` with hot-reload.
 
 **Building for production:**
 ```bash
-cd extension
+cd frontend
 npm run build
 ```
 
 **Testing:**
 ```bash
-cd extension
+cd frontend
 npm test
 ```
 
@@ -171,7 +171,7 @@ COSMOS_CONTAINER_NAME=analysis-cache
 
 ### Extension won't load
 - Verify Node.js 18+ is installed: `node --version`
-- Check that dependencies are installed: `cd extension && npm install`
+- Check that dependencies are installed: `cd frontend && npm install`
 - Ensure the extension is built: `npm run dev` or `npm run build`
 - Check Chrome console for errors
 

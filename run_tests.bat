@@ -17,7 +17,7 @@ cd ..
 echo.
 echo [2/2] Running Frontend Tests (vitest)
 echo ------------------------------------------
-cd extension
+cd frontend
 call npm run test:run
 set FRONTEND_EXIT=%ERRORLEVEL%
 cd ..
