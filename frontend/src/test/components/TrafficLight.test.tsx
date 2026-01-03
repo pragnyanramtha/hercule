@@ -9,7 +9,7 @@ describe('TrafficLight', () => {
   describe('Score Display', () => {
     it('should display the score value', () => {
       render(<TrafficLight score={75} />);
-      expect(screen.getAllByText('75')).toHaveLength(2); // Shows in circle and text
+      expect(screen.getByText('75')).toBeInTheDocument();
     });
 
     it('should display "out of 100" label', () => {

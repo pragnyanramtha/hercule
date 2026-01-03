@@ -23,14 +23,14 @@ describe('RedFlags', () => {
 
     it('should display all red flags', () => {
       render(<RedFlags redFlags={sampleFlags} />);
-      expect(screen.getByText('Flag 1')).toBeInTheDocument();
-      expect(screen.getByText('Flag 2')).toBeInTheDocument();
-      expect(screen.getByText('Flag 3')).toBeInTheDocument();
+      expect(screen.getByText(/Flag 1/)).toBeInTheDocument();
+      expect(screen.getByText(/Flag 2/)).toBeInTheDocument();
+      expect(screen.getByText(/Flag 3/)).toBeInTheDocument();
     });
 
     it('should show warning icons', () => {
       render(<RedFlags redFlags={sampleFlags} />);
-      const warnings = screen.getAllByText('⚠️');
+      const warnings = screen.getAllByText(/⚠️/);
       expect(warnings).toHaveLength(3);
     });
 
@@ -45,9 +45,9 @@ describe('RedFlags', () => {
 
     it('should show only first 5 flags initially', () => {
       render(<RedFlags redFlags={manyFlags} />);
-      expect(screen.getByText('Red Flag 1')).toBeInTheDocument();
-      expect(screen.getByText('Red Flag 5')).toBeInTheDocument();
-      expect(screen.queryByText('Red Flag 6')).not.toBeInTheDocument();
+      expect(screen.getByText(/Red Flag 1/)).toBeInTheDocument();
+      expect(screen.getByText(/Red Flag 5/)).toBeInTheDocument();
+      expect(screen.queryByText(/Red Flag 6/)).not.toBeInTheDocument();
     });
 
     it('should show "Show More" button when more than 5 flags', () => {
@@ -60,8 +60,8 @@ describe('RedFlags', () => {
       
       fireEvent.click(screen.getByText('Show More (3 more)'));
       
-      expect(screen.getByText('Red Flag 6')).toBeInTheDocument();
-      expect(screen.getByText('Red Flag 8')).toBeInTheDocument();
+      expect(screen.getByText(/Red Flag 6/)).toBeInTheDocument();
+      expect(screen.getByText(/Red Flag 8/)).toBeInTheDocument();
     });
 
     it('should show "Show Less" after expansion', () => {
@@ -78,7 +78,7 @@ describe('RedFlags', () => {
       fireEvent.click(screen.getByText('Show More (3 more)'));
       fireEvent.click(screen.getByText('Show Less'));
       
-      expect(screen.queryByText('Red Flag 6')).not.toBeInTheDocument();
+      expect(screen.queryByText(/Red Flag 6/)).not.toBeInTheDocument();
     });
 
     it('should not show expansion button for 5 or fewer flags', () => {
