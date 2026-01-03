@@ -232,8 +232,9 @@ class TestAPIEndpoints:
         """Create test client."""
         from fastapi.testclient import TestClient
         from main import app
-        with TestClient(app) as client:
-            yield client
+        client = TestClient(app)
+        yield client
+        client.close()
     
     def test_health_endpoint(self, client):
         """Health endpoint should return status."""
@@ -380,7 +381,8 @@ class TestTypeContract:
         from fastapi.testclient import TestClient
         from main import app
         
-        with TestClient(app) as client:
+        client = TestClient(app)
+        try:
             response = client.post("/analyze", json={
                 "policy_text": sample_policy_text,
                 "url": "https://example.com"
@@ -410,13 +412,16 @@ class TestTypeContract:
                 assert 'text' in item
                 assert 'priority' in item
                 assert item['priority'] in ['high', 'medium', 'low']
+        finally:
+            client.close()
     
     def test_health_response_matches_typescript(self):
         """Health endpoint should match HealthResponse interface."""
         from fastapi.testclient import TestClient
         from main import app
         
-        with TestClient(app) as client:
+        client = TestClient(app)
+        try:
             response = client.get("/health")
             data = response.json()
             
@@ -425,6 +430,8 @@ class TestTypeContract:
             assert isinstance(data['timestamp'], str)
             assert isinstance(data['cache_size'], int)
             assert isinstance(data['test_mode'], bool)
+        finally:
+            client.close()
 
 
 # ============== Integration Tests ==============
@@ -437,8 +444,9 @@ class TestIntegration:
         """Create test client."""
         from fastapi.testclient import TestClient
         from main import app
-        with TestClient(app) as client:
-            yield client
+        client = TestClient(app)
+        yield client
+        client.close()
     
     def test_full_analysis_flow(self, client):
         """Test complete analysis flow from request to response."""
