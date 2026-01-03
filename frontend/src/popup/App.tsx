@@ -152,8 +152,8 @@ function AppContent() {
             </div>
             <div className="flex justify-between w-full max-w-[200px] mt-2 text-[10px] uppercase tracking-wider font-semibold">
               <span className={loading.phase === 'discovering' ? 'text-indigo-400' : 'text-emerald-400'}>Find</span>
-              <span className={loading.phase === 'analyzing' ? 'text-indigo-400' : (loading.phase === 'done' ? 'text-emerald-400' : 'text-slate-600')}>Analyze</span>
-              <span className={loading.phase === 'done' ? 'text-emerald-400' : 'text-slate-600'}>Done</span>
+              <span className={loading.phase === 'analyzing' ? 'text-indigo-400' : 'text-slate-600'}>Analyze</span>
+              <span className="text-slate-600">Done</span>
             </div>
           </div>
         )}
