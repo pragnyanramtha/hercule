@@ -1,13 +1,13 @@
 """
 Aggressive Privacy Policy Discovery Service
-Finds and extracts privacy policy text from any website.
+Finds and extracts privacy policy text from any website - FAST.
 """
 import logging
 import asyncio
 import httpx
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin, urlparse
-from typing import Optional, Tuple
+from typing import Optional, List
 from dataclasses import dataclass
 
 logger = logging.getLogger("hercule-api.discovery")
@@ -18,18 +18,20 @@ class DiscoveryResult:
     success: bool
     policy_text: Optional[str] = None
     policy_url: Optional[str] = None
-    method: Optional[str] = None  # 'parallel_paths', 'homepage_scrape', 'duckduckgo'
+    method: Optional[str] = None
     error: Optional[str] = None
 
 
 class DiscoveryService:
     """
-    Aggressive privacy policy discovery service.
+    Ultra-fast privacy policy discovery service.
     
-    Strategy:
-    1. Parallel check 25+ common privacy policy URL paths
-    2. If none hit, scrape current page for "privacy policy" links
-    3. If that fails, DuckDuckGo search as last resort
+    Strategy (ALL IN PARALLEL):
+    1. Check 26 common privacy policy URL paths
+    2. Scrape root domain landing page for privacy links
+    3. Scrape current page for privacy links (if different from root)
+    
+    If all parallel attempts fail, fall back to DuckDuckGo search.
     """
     
     def __init__(self):
@@ -39,116 +41,112 @@ class DiscoveryService:
             'Accept-Language': 'en-US,en;q=0.5',
         }
         
-        # 25+ common privacy policy paths to check in parallel
+        # 26 common privacy policy paths
         self.common_paths = [
-            '/privacy',
-            '/privacy-policy',
-            '/privacy_policy',
-            '/privacypolicy',
-            '/legal/privacy',
-            '/legal/privacy-policy',
-            '/policies/privacy',
-            '/policies/privacy-policy',
-            '/about/privacy',
-            '/info/privacy',
-            '/terms/privacy',
-            '/en/privacy',
-            '/us/privacy',
-            '/privacy.html',
-            '/privacy-policy.html',
-            '/legal',
-            '/legal/terms',
-            '/terms',
-            '/terms-of-service',
-            '/tos',
-            '/terms-and-conditions',
-            '/data-privacy',
-            '/data-protection',
-            '/gdpr',
-            '/ccpa',
-            '/cookie-policy',
+            '/privacy', '/privacy-policy', '/privacy_policy', '/privacypolicy',
+            '/legal/privacy', '/legal/privacy-policy', '/policies/privacy',
+            '/policies/privacy-policy', '/about/privacy', '/info/privacy',
+            '/terms/privacy', '/en/privacy', '/us/privacy', '/privacy.html',
+            '/privacy-policy.html', '/legal', '/legal/terms', '/terms',
+            '/terms-of-service', '/tos', '/terms-and-conditions',
+            '/data-privacy', '/data-protection', '/gdpr', '/ccpa', '/cookie-policy',
         ]
         
-        # Keywords to look for in link text/href
+        # Keywords for link detection
         self.link_keywords = [
             'privacy policy', 'privacy', 'data policy', 'data protection',
-            'terms of service', 'terms and conditions', 'terms of use',
-            'legal', 'user agreement'
+            'terms of service', 'terms and conditions', 'terms of use', 'legal'
         ]
 
     async def discover_and_extract(self, url: str) -> DiscoveryResult:
         """
         Main entry point: Find privacy policy and extract its text.
-        Does NOT return until policy text is found or all methods exhausted.
+        Runs path checking and page scraping IN PARALLEL for speed.
         """
         try:
-            domain = self._get_domain(url)
+            parsed = urlparse(url if url.startswith('http') else f'https://{url}')
+            domain = parsed.netloc
             base_url = f"https://{domain}"
+            current_url = url if url.startswith('http') else f'https://{url}'
             
-            logger.info(f"🔍 Starting aggressive policy discovery for {domain}")
+            logger.info(f"🔍 Starting parallel discovery for {domain}")
 
-            # Step 1: Parallel path checking (fastest)
-            logger.info(f"🚀 Step 1: Checking {len(self.common_paths)} common paths in parallel...")
-            result = await self._parallel_path_check(base_url)
-            if result.success:
-                logger.info(f"✅ Found via parallel paths: {result.policy_url}")
-                return result
+            # Run ALL discovery methods in parallel
+            async with httpx.AsyncClient(
+                headers=self.headers,
+                follow_redirects=True,
+                timeout=10.0,
+                verify=False
+            ) as client:
+                
+                # Create all tasks
+                tasks = []
+                
+                # Task 1: Check all 26 common paths in parallel
+                path_tasks = [
+                    self._check_path_and_extract(client, base_url, path)
+                    for path in self.common_paths
+                ]
+                tasks.extend(path_tasks)
+                
+                # Task 2: Scrape root domain landing page
+                tasks.append(self._scrape_page_for_links(client, base_url, "root"))
+                
+                # Task 3: Scrape current page (if different from root)
+                if current_url.rstrip('/') != base_url.rstrip('/'):
+                    tasks.append(self._scrape_page_for_links(client, current_url, "current"))
+                
+                logger.info(f"🚀 Launching {len(tasks)} parallel requests...")
+                
+                # Run all tasks, return first success
+                result = await self._race_for_success(tasks)
+                
+                if result and result.success:
+                    logger.info(f"✅ Found via {result.method}: {result.policy_url}")
+                    return result
 
-            # Step 2: Scrape homepage for privacy links
-            logger.info("🔍 Step 2: Scraping homepage for privacy policy links...")
-            result = await self._scrape_for_privacy_links(base_url)
-            if result.success:
-                logger.info(f"✅ Found via homepage scraping: {result.policy_url}")
-                return result
-
-            # Step 3: DuckDuckGo search as last resort
-            logger.info("🔍 Step 3: Searching DuckDuckGo for privacy policy...")
+            # Fallback: DuckDuckGo search (only if parallel methods failed)
+            logger.info("⚠️ Parallel discovery failed. Trying DuckDuckGo search...")
             result = await self._duckduckgo_search(domain)
-            if result.success:
+            if result and result.success:
                 logger.info(f"✅ Found via DuckDuckGo: {result.policy_url}")
                 return result
 
             logger.warning(f"❌ Could not find privacy policy for {domain}")
             return DiscoveryResult(
                 success=False,
-                error=f"Could not find privacy policy for {domain} after exhaustive search"
+                error=f"Could not find privacy policy for {domain}"
             )
 
         except Exception as e:
             logger.error(f"Discovery error: {e}")
             return DiscoveryResult(success=False, error=str(e))
 
-    def _get_domain(self, url: str) -> str:
-        """Extract domain from URL."""
-        if not url.startswith(('http://', 'https://')):
-            url = f"https://{url}"
-        parsed = urlparse(url)
-        return parsed.netloc or parsed.path.split('/')[0]
-
-    async def _parallel_path_check(self, base_url: str) -> DiscoveryResult:
-        """Check all common paths in parallel, return first successful one with text."""
-        async with httpx.AsyncClient(
-            headers=self.headers,
-            follow_redirects=True,
-            timeout=8.0,
-            verify=False
-        ) as client:
-            tasks = [
-                self._check_path_and_extract(client, base_url, path)
-                for path in self.common_paths
-            ]
+    async def _race_for_success(self, tasks: List) -> Optional[DiscoveryResult]:
+        """Run all tasks and return the first successful result."""
+        pending = set()
+        
+        for task in tasks:
+            pending.add(asyncio.create_task(task))
+        
+        while pending:
+            done, pending = await asyncio.wait(
+                pending,
+                return_when=asyncio.FIRST_COMPLETED
+            )
             
-            # Use as_completed to return as soon as we find one
-            for coro in asyncio.as_completed(tasks):
+            for task in done:
                 try:
-                    result = await coro
+                    result = task.result()
                     if result and result.success and result.policy_text:
                         # Cancel remaining tasks
+                        for p in pending:
+                            p.cancel()
                         return result
                 except Exception:
                     continue
-            
-        return DiscoveryResult(success=False)
+        
+        return None
 
     async def _check_path_and_extract(
         self, client: httpx.AsyncClient, base_url: str, path: str
@@ -164,95 +162,95 @@ class DiscoveryService:
             if 'html' not in content_type:
                 return None
             
-            # Extract and validate text
             text = self._extract_text(resp.text)
             if self._looks_like_privacy_policy(text):
                 return DiscoveryResult(
                     success=True,
                     policy_text=text,
                     policy_url=str(resp.url),
-                    method='parallel_paths'
+                    method=f'path:{path}'
                 )
             return None
         except Exception:
             return None
 
-    async def _scrape_for_privacy_links(self, base_url: str) -> DiscoveryResult:
-        """Scrape the homepage for links containing privacy-related keywords."""
+    async def _scrape_page_for_links(
+        self, client: httpx.AsyncClient, page_url: str, source: str
+    ) -> Optional[DiscoveryResult]:
+        """Scrape a page for privacy policy links and follow the best one."""
         try:
-            async with httpx.AsyncClient(
-                headers=self.headers,
-                follow_redirects=True,
-                timeout=10.0,
-                verify=False
-            ) as client:
-                # Fetch homepage
-                resp = await client.get(base_url)
-                if resp.status_code != 200:
-                    return DiscoveryResult(success=False)
+            resp = await client.get(page_url)
+            if resp.status_code != 200:
+                return None
+            
+            soup = BeautifulSoup(resp.text, 'html.parser')
+            
+            # Find and score all links
+            candidates = []
+            for a in soup.find_all('a', href=True):
+                href = a.get('href', '')
+                text = a.get_text(strip=True).lower()
                 
-                soup = BeautifulSoup(resp.text, 'html.parser')
+                if not href or href.startswith(('javascript:', '#', 'mailto:')):
+                    continue
                 
-                # Find all links and score them
-                candidates = []
-                for a in soup.find_all('a', href=True):
-                    href = a.get('href', '')
-                    text = a.get_text(strip=True).lower()
-                    
-                    # Skip empty or javascript links
-                    if not href or href.startswith(('javascript:', '#', 'mailto:')):
-                        continue
-                    
-                    # Score based on keyword matches
-                    score = 0
-                    href_lower = href.lower()
-                    
-                    # Exact text matches (highest priority)
-                    if text in ['privacy policy', 'privacy']:
-                        score += 100
-                    elif text in ['terms of service', 'terms', 'legal']:
-                        score += 50
-                    
-                    # Partial matches
-                    for keyword in self.link_keywords:
-                        if keyword in text:
-                            score += 30
-                        if keyword.replace(' ', '-') in href_lower or keyword.replace(' ', '_') in href_lower:
-                            score += 20
-                    
-                    if score > 0:
-                        full_url = urljoin(base_url, href)
-                        candidates.append((score, full_url))
-                
-                # Sort by score descending
-                candidates.sort(key=lambda x: x[0], reverse=True)
-                
-                # Try top candidates
-                for score, url in candidates[:5]:
-                    try:
-                        resp = await client.get(url)
-                        if resp.status_code == 200:
-                            text = self._extract_text(resp.text)
-                            if self._looks_like_privacy_policy(text):
-                                return DiscoveryResult(
-                                    success=True,
-                                    policy_text=text,
-                                    policy_url=str(resp.url),
-                                    method='homepage_scrape'
-                                )
-                    except Exception:
-                        continue
-                
-                return DiscoveryResult(success=False)
-                
-        except Exception as e:
-            logger.warning(f"Homepage scraping failed: {e}")
-            return DiscoveryResult(success=False)
+                score = self._score_link(text, href)
+                if score > 0:
+                    full_url = urljoin(page_url, href)
+                    candidates.append((score, full_url))
+            
+            # Sort by score and try top candidates
+            candidates.sort(key=lambda x: x[0], reverse=True)
+            
+            for score, url in candidates[:3]:
+                try:
+                    link_resp = await client.get(url)
+                    if link_resp.status_code == 200:
+                        text = self._extract_text(link_resp.text)
+                        if self._looks_like_privacy_policy(text):
+                            return DiscoveryResult(
+                                success=True,
+                                policy_text=text,
+                                policy_url=str(link_resp.url),
+                                method=f'scrape:{source}'
+                            )
+                except Exception:
+                    continue
+            
+            return None
+            
+        except Exception:
+            return None
 
-    async def _duckduckgo_search(self, domain: str) -> DiscoveryResult:
-        """Search DuckDuckGo for the privacy policy and fetch the result."""
+    def _score_link(self, text: str, href: str) -> int:
+        """Score a link based on how likely it is to be a privacy policy."""
+        score = 0
+        href_lower = href.lower()
+        
+        # Exact text matches (highest priority)
+        if text in ['privacy policy', 'privacy']:
+            score += 100
+        elif text in ['terms of service', 'terms', 'legal']:
+            score += 50
+        
+        # Partial text matches
+        for keyword in self.link_keywords:
+            if keyword in text:
+                score += 30
+            if keyword.replace(' ', '-') in href_lower or keyword.replace(' ', '_') in href_lower:
+                score += 20
+        
+        # URL path matches
+        if '/privacy' in href_lower:
+            score += 40
+        if '/legal' in href_lower:
+            score += 20
+        
+        return score
+
+    async def _duckduckgo_search(self, domain: str) -> Optional[DiscoveryResult]:
+        """Search DuckDuckGo for the privacy policy (last resort)."""
         try:
-            # Try new package name first, fall back to old
             try:
                 from ddgs import DDGS
             except ImportError:
@@ -261,16 +259,13 @@ class DiscoveryService:
             def search_sync():
                 query = f"site:{domain} privacy policy"
                 with DDGS() as ddgs:
-                    results = list(ddgs.text(query, max_results=3))
-                    return results
+                    return list(ddgs.text(query, max_results=3))
             
-            # Run sync search in thread pool
             results = await asyncio.to_thread(search_sync)
             
             if not results:
-                return DiscoveryResult(success=False)
+                return None
             
-            # Try to fetch each result
             async with httpx.AsyncClient(
                 headers=self.headers,
                 follow_redirects=True,
@@ -296,44 +291,36 @@ class DiscoveryService:
                     except Exception:
                         continue
             
-            return DiscoveryResult(success=False)
+            return None
             
         except Exception as e:
             logger.error(f"DuckDuckGo search failed: {e}")
-            return DiscoveryResult(success=False)
+            return None
 
     def _extract_text(self, html: str) -> str:
         """Extract clean text from HTML."""
         soup = BeautifulSoup(html, 'html.parser')
         
-        # Remove script, style, nav, header, footer elements
         for tag in soup(['script', 'style', 'nav', 'header', 'footer', 'aside', 'noscript']):
             tag.decompose()
         
-        # Get text
         text = soup.get_text(separator=' ', strip=True)
         
-        # Clean up whitespace
         import re
         text = re.sub(r'\s+', ' ', text)
         
-        # Truncate to 50k chars
         if len(text) > 50000:
             text = text[:50000] + "\n[Text truncated at 50,000 characters]"
         
         return text
 
     def _looks_like_privacy_policy(self, text: str) -> bool:
-        """
-        Heuristic check if text looks like a privacy policy.
-        Must contain several privacy-related terms.
-        """
+        """Heuristic check if text looks like a privacy policy."""
         if len(text) < 500:
             return False
         
         text_lower = text.lower()
         
-        # Must-have keywords (need at least 3)
         privacy_keywords = [
             'privacy', 'personal data', 'personal information',
             'collect', 'data collection', 'information we collect',
@@ -345,12 +332,9 @@ class DiscoveryService:
         ]
         
         matches = sum(1 for kw in privacy_keywords if kw in text_lower)
-        
-        # Need at least 3 keyword matches to be considered a privacy policy
         return matches >= 3
 
-
-# Legacy method for backward compatibility
+    # Legacy method for backward compatibility
     async def find_policy(self, url: str) -> Optional[str]:
         """Legacy method - returns just the URL."""
         result = await self.discover_and_extract(url)
