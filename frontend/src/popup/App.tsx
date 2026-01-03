@@ -8,179 +8,98 @@ import RedFlags from './components/RedFlags';
 import ActionItems from './components/ActionItems';
 import { Icons } from './components/Icons';
 
+type LoadingPhase = 'idle' | 'discovering' | 'analyzing' | 'done' | 'error';
+
 interface LoadingState {
-  isLoading: boolean;
+  phase: LoadingPhase;
   message: string;
 }
 
-interface ComponentLoadingState {
-  extraction: boolean;
-  discovery: boolean;
-  analysis: boolean;
-}
-
 function AppContent() {
-  const [loading, setLoading] = useState<LoadingState>({ isLoading: true, message: 'Extracting policy text...' });
-  const [componentLoading, setComponentLoading] = useState<ComponentLoadingState>({ extraction: true, discovery: false, analysis: false });
+  const [loading, setLoading] = useState<LoadingState>({ phase: 'discovering', message: 'Finding privacy policy...' });
   const [result, setResult] = useState<AnalysisResult | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    analyzePolicyFromCurrentPage();
+    analyzeCurrentSite();
   }, []);
 
-  const analyzePolicyFromCurrentPage = async () => {
+  const analyzeCurrentSite = async () => {
     try {
-      setLoading({ isLoading: true, message: 'Extracting policy text...' });
-      setComponentLoading({ extraction: true, discovery: false, analysis: false });
+      setLoading({ phase: 'discovering', message: 'Finding privacy policy...' });
       setError(null);
+      setResult(null);
 
+      // Get current tab URL
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-
-      if (!tab.id) {
+      
+      if (!tab.url) {
         setError('Could not access current tab');
-        setLoading({ isLoading: false, message: '' });
+        setLoading({ phase: 'error', message: '' });
         return;
       }
 
-      // Check if this is a restricted page
-      if (tab.url?.startsWith('chrome://') || tab.url?.startsWith('chrome-extension://') ||
-        tab.url?.startsWith('about:') || tab.url?.startsWith('edge://')) {
-        setError('Cannot analyze browser extension or internal pages. Please navigate to a standard website.');
-        setLoading({ isLoading: false, message: '' });
+      // Check for restricted pages
+      if (tab.url.startsWith('chrome://') || tab.url.startsWith('chrome-extension://') ||
+          tab.url.startsWith('about:') || tab.url.startsWith('edge://')) {
+        setError('Cannot analyze browser internal pages. Navigate to a website first.');
+        setLoading({ phase: 'error', message: '' });
         return;
       }
 
-      let response;
+      // Send URL to backend - it handles everything (discovery + analysis)
+      setLoading({ phase: 'discovering', message: 'Searching for privacy policy...' });
+      
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 60000); // 60s timeout for full flow
+
       try {
-        response = await chrome.tabs.sendMessage(tab.id, {
-          action: 'extractCurrentPage'
+        const response = await fetch(`${config.apiUrl}/analyze`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ policy_text: '', url: tab.url }),
+          signal: controller.signal,
         });
-      } catch (connectionError) {
-        // Content script not loaded - inject it programmatically
-        console.log('Content script not found, injecting...');
-        try {
-          await chrome.scripting.executeScript({
-            target: { tabId: tab.id },
-            files: ['content/content.js']
-          });
-          await new Promise(resolve => setTimeout(resolve, 100));
-          response = await chrome.tabs.sendMessage(tab.id, {
-            action: 'extractCurrentPage'
-          });
-        } catch (injectError) {
-          console.error('Failed to inject content script:', injectError);
-          setError('Cannot access this page. Try refreshing the page.');
-          setLoading({ isLoading: false, message: '' });
-          return;
+
+        clearTimeout(timeoutId);
+
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}));
+          throw new Error(errorData.detail || `Analysis failed (${response.status})`);
         }
+
+        const analysisResult: AnalysisResult = await response.json();
+        setResult(analysisResult);
+        setLoading({ phase: 'done', message: '' });
+
+      } catch (err) {
+        clearTimeout(timeoutId);
+        
+        if (err instanceof Error) {
+          if (err.name === 'AbortError') {
+            setError('Request timed out. The site may be slow or blocking requests.');
+          } else {
+            setError(err.message);
+          }
+        } else {
+          setError('Unknown error occurred');
+        }
+        setLoading({ phase: 'error', message: '' });
       }
-
-      setComponentLoading({ extraction: false, discovery: false, analysis: true });
-
-      // Heuristic: If text is very short (< 200 chars) OR extraction failed, assume it's not a policy page.
-      // We automatically trigger Smart Discovery in these cases.
-      const isShortText = response.success && response.policyText && response.policyText.length < 200;
-
-      if (!response.success || isShortText) {
-        console.log("Not a policy page (extraction failed or text too short). Trying Smart Discovery...");
-        await performSmartDiscovery(tab.url || '');
-        return;
-      }
-
-      setLoading({ isLoading: true, message: 'Analyzing privacy risks (this may take a moment)...' });
-      await analyzePolicy(response.policyText, response.policyUrl || '');
 
     } catch (err) {
-      console.error('Error in analyzePolicyFromCurrentPage:', err);
-      setError('Could not analyze policy. Connection failed.');
-      setLoading({ isLoading: false, message: '' });
+      console.error('Error:', err);
+      setError('Could not analyze this site.');
+      setLoading({ phase: 'error', message: '' });
     }
   };
 
-  const performSmartDiscovery = async (currentUrl: string) => {
-    try {
-      setLoading({ isLoading: true, message: 'Searching for privacy policy...' });
-      setComponentLoading({ extraction: false, discovery: true, analysis: false });
-
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 15000); // 15s timeout for discovery
-
-      const response = await fetch(`${config.apiUrl}/discover_policy?url=${encodeURIComponent(currentUrl)}`, {
-        method: 'GET',
-        headers: { 'Content-Type': 'application/json' },
-        signal: controller.signal,
-      });
-
-      clearTimeout(timeoutId);
-
-      if (!response.ok) {
-        setError('Could not automatically find a privacy policy on this site.');
-        setLoading({ isLoading: false, message: '' });
-        setComponentLoading({ extraction: false, discovery: false, analysis: false });
-        return;
-      }
-
-      const data = await response.json();
-      if (data.policy_url) {
-        setLoading({ isLoading: true, message: `Found policy at ${new URL(data.policy_url).pathname}. Analyzing...` });
-        setComponentLoading({ extraction: false, discovery: false, analysis: true });
-        // Analyze the found URL
-        await analyzePolicy("", data.policy_url);
-      } else {
-        setError('Privacy policy not found.');
-        setLoading({ isLoading: false, message: '' });
-        setComponentLoading({ extraction: false, discovery: false, analysis: false });
-      }
-
-    } catch (err) {
-      console.error('Smart discovery error:', err);
-      setError('Failed to search for privacy policy.');
-      setLoading({ isLoading: false, message: '' });
-      setComponentLoading({ extraction: false, discovery: false, analysis: false });
-    }
-  };
-
-  const analyzePolicy = async (policyText: string, url: string, retryCount = 0) => {
-    try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), config.requestTimeout);
-
-      const response = await fetch(`${config.apiUrl}/analyze`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ policy_text: policyText, url }),
-        signal: controller.signal,
-      });
-
-      clearTimeout(timeoutId);
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.detail || `Backend returned ${response.status}`);
-      }
-
-      const analysisResult: AnalysisResult = await response.json();
-      setResult(analysisResult);
-      setLoading({ isLoading: false, message: '' });
-      setComponentLoading({ extraction: false, discovery: false, analysis: false });
-
-    } catch (err) {
-      console.error('Error calling backend:', err);
-
-      if (retryCount < config.maxRetries && err instanceof Error && err.name !== 'AbortError') {
-        console.log(`Retrying... attempt ${retryCount + 1}`);
-        await new Promise(resolve => setTimeout(resolve, 1000 * (retryCount + 1)));
-        return analyzePolicy(policyText, url, retryCount + 1);
-      }
-
-      const errorMessage = err instanceof Error
-        ? (err.name === 'AbortError' ? 'Analysis timed out' : err.message)
-        : 'Unknown error';
-
-      setError(errorMessage);
-      setLoading({ isLoading: false, message: '' });
-      setComponentLoading({ extraction: false, discovery: false, analysis: false });
+  const getProgressWidth = () => {
+    switch (loading.phase) {
+      case 'discovering': return 'w-1/3';
+      case 'analyzing': return 'w-2/3';
+      case 'done': return 'w-full';
+      default: return 'w-0';
     }
   };
 
@@ -200,55 +119,64 @@ function AppContent() {
           </h1>
         </div>
         <div className="px-2 py-0.5 rounded-full bg-slate-800/50 border border-slate-700/50">
-          <span className="text-[10px] font-mono text-slate-400 font-medium">v1.1</span>
+          <span className="text-[10px] font-mono text-slate-400 font-medium">v1.2</span>
         </div>
       </header>
 
       <main className="p-6">
-        {loading.isLoading && (
+        {/* Loading State */}
+        {(loading.phase === 'discovering' || loading.phase === 'analyzing') && (
           <div className="flex flex-col items-center justify-center py-20 animate-fade-in-scale">
             <div className="relative mb-10">
-              <div className={`absolute inset-0 rounded-full blur-2xl transition-colors duration-1000 ${componentLoading.analysis ? 'bg-emerald-500/20' : 'bg-indigo-500/20'} animate-pulse`}></div>
+              <div className={`absolute inset-0 rounded-full blur-2xl transition-colors duration-1000 ${loading.phase === 'analyzing' ? 'bg-emerald-500/20' : 'bg-indigo-500/20'} animate-pulse`}></div>
               <div className="w-16 h-16 relative">
                 <div className="absolute inset-0 border-4 border-slate-800/50 rounded-full"></div>
-                <div className={`absolute inset-0 border-4 border-t-current border-r-transparent border-b-transparent border-l-transparent rounded-full animate-spin transition-colors duration-1000 ${componentLoading.analysis ? 'text-emerald-400' : 'text-indigo-500'}`}></div>
+                <div className={`absolute inset-0 border-4 border-t-current border-r-transparent border-b-transparent border-l-transparent rounded-full animate-spin transition-colors duration-1000 ${loading.phase === 'analyzing' ? 'text-emerald-400' : 'text-indigo-500'}`}></div>
               </div>
             </div>
 
-            <p key={loading.message} className="text-slate-200 font-medium text-base mb-2 animate-fade-in-scale h-6">
+            <p className="text-slate-200 font-medium text-base mb-2 animate-fade-in-scale h-6">
               {loading.message}
             </p>
 
-            <div className="flex items-center gap-4 mt-8 w-full max-w-[200px]">
+            <p className="text-slate-500 text-xs mb-6">
+              {loading.phase === 'discovering' 
+                ? 'Checking common paths, scraping links, searching...' 
+                : 'AI is analyzing the policy...'}
+            </p>
+
+            <div className="flex items-center gap-4 mt-4 w-full max-w-[200px]">
               <div className="flex-1 h-1 bg-slate-800 rounded-full overflow-hidden">
-                <div className={`h-full transition-all duration-1000 ease-out ${componentLoading.analysis ? 'bg-emerald-400 w-full' : (componentLoading.discovery ? 'bg-indigo-500 w-2/3' : 'bg-indigo-500 w-1/3')}`}></div>
+                <div className={`h-full transition-all duration-1000 ease-out bg-indigo-500 ${getProgressWidth()}`}></div>
               </div>
             </div>
-            <div className="flex justify-between w-full max-w-[200px] mt-2 text-[10px] uppercase tracking-wider text-slate-500 font-semibold">
-              <span className={`transition-colors duration-500 ${!componentLoading.analysis && !componentLoading.discovery ? 'text-indigo-400' : 'text-emerald-400'}`}>Extract</span>
-              <span className={`transition-colors duration-500 ${componentLoading.discovery ? 'text-indigo-400' : (componentLoading.analysis ? 'text-emerald-400' : 'text-slate-600')}`}>Find</span>
-              <span className={`transition-colors duration-500 ${componentLoading.analysis ? 'text-indigo-400' : (result ? 'text-emerald-400' : 'text-slate-600')}`}>Analyze</span>
+            <div className="flex justify-between w-full max-w-[200px] mt-2 text-[10px] uppercase tracking-wider font-semibold">
+              <span className={loading.phase === 'discovering' ? 'text-indigo-400' : 'text-emerald-400'}>Find</span>
+              <span className={loading.phase === 'analyzing' ? 'text-indigo-400' : (loading.phase === 'done' ? 'text-emerald-400' : 'text-slate-600')}>Analyze</span>
+              <span className={loading.phase === 'done' ? 'text-emerald-400' : 'text-slate-600'}>Done</span>
             </div>
           </div>
         )}
 
-        {error && !loading.isLoading && (
+        {/* Error State */}
+        {error && loading.phase === 'error' && (
           <div className="bg-rose-950/20 border border-rose-500/20 p-8 rounded-3xl text-center backdrop-blur-sm animate-slide-up">
             <div className="inline-flex p-4 rounded-full bg-rose-500/10 mb-6 ring-1 ring-rose-500/20">
               <Icons.Alert className="w-8 h-8 text-rose-500" />
             </div>
-            <h3 className="text-rose-200 font-semibold text-lg mb-2">Analysis Failed</h3>
+            <h3 className="text-rose-200 font-semibold text-lg mb-2">Could Not Find Policy</h3>
             <p className="text-rose-200/70 text-sm mb-8 max-w-xs mx-auto leading-relaxed">{error}</p>
             <button
-              onClick={analyzePolicyFromCurrentPage}
+              onClick={analyzeCurrentSite}
               className="px-6 py-3 bg-gradient-to-r from-rose-600 to-rose-700 hover:from-rose-500 hover:to-rose-600 text-white rounded-xl shadow-lg shadow-rose-900/40 transition-all active:scale-95 font-medium text-sm flex items-center justify-center gap-2 mx-auto w-full group"
             >
-              <span className="text-lg group-hover:rotate-180 transition-transform duration-500">↻</span> Retry Analysis
+              <span className="text-lg group-hover:rotate-180 transition-transform duration-500">↻</span> Try Again
             </button>
           </div>
         )}
 
-        {result && !loading.isLoading && (
+        {/* Results */}
+        {result && loading.phase === 'done' && (
           <div className="space-y-6">
             <ErrorBoundary>
               <div className="bg-slate-900/40 border border-slate-800/60 rounded-[32px] p-8 flex flex-col items-center backdrop-blur-sm shadow-2xl shadow-indigo-500/5 animate-slide-up">
