@@ -1,9 +1,9 @@
 /**
- * Content Script for Privacy Policy Analyzer
+ * Content Script for Hercule
  * Scans pages for privacy-related links and extracts policy text
  */
 
-console.log('Privacy Policy Analyzer content script loaded');
+console.log('Hercule content script loaded');
 
 // Constants
 const MAX_TEXT_LENGTH = 50000;

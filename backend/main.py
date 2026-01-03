@@ -1,5 +1,5 @@
 """
-Privacy Policy Analyzer API
+Hercule API
 FastAPI backend for analyzing privacy policies using Azure OpenAI.
 """
 import os
@@ -27,10 +27,10 @@ logging.basicConfig(
     format="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S"
 )
-logger = logging.getLogger("privacy-api")
+logger = logging.getLogger("hercule-api")
 
 # Initialize FastAPI app
-app = FastAPI(title="Privacy Policy Analyzer API")
+app = FastAPI(title="Hercule API")
 
 # CORS configuration - restrict in production
 ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "*").split(",")

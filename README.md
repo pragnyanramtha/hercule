@@ -1,4 +1,4 @@
-# Privacy Policy Analyzer
+# Hercule
 
 A browser extension that leverages Azure OpenAI to democratize privacy policy comprehension. The system analyzes privacy policies and presents them through an intuitive traffic-light interface with actionable insights.
 
@@ -77,14 +77,14 @@ npm run dev
 1. Open Chrome and navigate to `chrome://extensions/`
 2. Enable "Developer mode" (toggle in top-right corner)
 3. Click "Load unpacked"
-4. Select the `extension/dist` directory
+4. Select the `frontend/dist` directory
 5. The extension icon should appear in your browser toolbar
 
 ## Project Structure
 
 ```
-privacy-policy-analyzer/
-├── extension/          # Chrome extension (React + TypeScript)
+hercule/
+├── frontend/          # Chrome extension (React + TypeScript)
 │   ├── src/
 │   │   ├── content/   # Content scripts for page scraping
 │   │   └── popup/     # Popup UI components
@@ -101,7 +101,7 @@ privacy-policy-analyzer/
 ## Usage
 
 1. Visit any website (e.g., google.com, facebook.com)
-2. Click the Privacy Policy Analyzer extension icon
+2. Click the Hercule extension icon
 3. The extension will:
    - Detect privacy policy links on the page
    - Extract and analyze the policy text

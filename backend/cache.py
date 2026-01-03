@@ -1,5 +1,5 @@
 """
-Cache module for Privacy Policy Analyzer.
+Cache module for Hercule.
 Handles in-memory caching with JSON file persistence.
 """
 import json

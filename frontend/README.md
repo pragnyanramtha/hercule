@@ -1,6 +1,6 @@
-# Privacy Policy Analyzer - Extension
+# Hercule - Frontend
 
-Browser extension component for the Privacy Policy Analyzer.
+Browser extension component for Hercule.
 
 ## Setup
 

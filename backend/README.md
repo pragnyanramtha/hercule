@@ -1,4 +1,4 @@
-# Privacy Policy Analyzer - Backend API
+# Hercule - Backend API
 
 FastAPI backend service for analyzing privacy policies using Azure OpenAI.
 

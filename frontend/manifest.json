@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "Privacy Policy Analyzer",
+  "name": "Hercule",
   "version": "1.0.0",
   "description": "AI-powered privacy policy analyzer that helps you understand website privacy policies",
   "permissions": [

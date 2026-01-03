@@ -1,5 +1,5 @@
 /**
- * Shared TypeScript types for Privacy Policy Analyzer
+ * Shared TypeScript types for Hercule
  * 
  * IMPORTANT: These types must stay in sync with backend/models.py
  * Any changes here should be reflected in the Pydantic models.
