@@ -78,7 +78,11 @@ class DiscoveryService:
     async def discover_and_extract(self, url: str) -> DiscoveryResult:
         """
         Main entry point: Find privacy policy and extract its text.
-        Runs path checking and page scraping IN PARALLEL for speed.
+        
+        STRATEGY:
+        1. Run page scans AND path checks CONCURRENTLY (fast)
+        2. Prioritize page scan results (90% success rate)
+        3. Fall back to DuckDuckGo only if both fail
         """
         try:
             parsed = urlparse(url if url.startswith('http') else f'https://{url}')
@@ -86,9 +90,8 @@ class DiscoveryService:
             base_url = f"https://{domain}"
             current_url = url if url.startswith('http') else f'https://{url}'
             
-            logger.info(f"🔍 Starting parallel discovery for {domain}")
+            logger.info(f"🔍 Starting discovery for {domain}")
 
-            # Run ALL discovery methods in parallel
             async with httpx.AsyncClient(
                 headers=self.headers,
                 follow_redirects=True,
@@ -96,34 +99,49 @@ class DiscoveryService:
                 verify=False
             ) as client:
                 
-                # Create all tasks
-                tasks = []
+                # Run BOTH page scans AND path checks in parallel
+                all_tasks = []
                 
-                # Task 1: Check all 26 common paths in parallel
+                # Page scan tasks (higher priority)
+                page_scan_tasks = [
+                    self._scrape_page_for_links(client, current_url, "current"),
+                    self._scrape_page_for_links(client, base_url, "root")
+                ]
+                all_tasks.extend(page_scan_tasks)
+                
+                # Path check tasks
                 path_tasks = [
                     self._check_path_and_extract(client, base_url, path)
                     for path in self.common_paths
                 ]
-                tasks.extend(path_tasks)
+                all_tasks.extend(path_tasks)
                 
-                # Task 2: Scrape root domain landing page
-                tasks.append(self._scrape_page_for_links(client, base_url, "root"))
+                logger.info(f"🚀 Launching {len(all_tasks)} parallel requests ({len(page_scan_tasks)} page scans + {len(path_tasks)} path checks)...")
                 
-                # Task 3: Scrape current page (if different from root)
-                if current_url.rstrip('/') != base_url.rstrip('/'):
-                    tasks.append(self._scrape_page_for_links(client, current_url, "current"))
+                # Run ALL tasks concurrently
+                all_results = await asyncio.gather(*all_tasks, return_exceptions=True)
                 
-                logger.info(f"🚀 Launching {len(tasks)} parallel requests...")
+                # Process results: Check page scans first (higher priority)
+                page_scan_results = all_results[:len(page_scan_tasks)]
+                path_check_results = all_results[len(page_scan_tasks):]
                 
-                # Run all tasks, return first success
-                result = await self._race_for_success(tasks)
+                # First, check page scan results
+                for result in page_scan_results:
+                    if result and not isinstance(result, Exception) and result.success:
+                        logger.info(f"✅ Found via page scan: {result.policy_url}")
+                        return result
                 
-                if result and result.success:
-                    logger.info(f"✅ Found via {result.method}: {result.policy_url}")
-                    return result
+                # If page scans failed, check path results
+                for result in path_check_results:
+                    if result and not isinstance(result, Exception) and result.success:
+                        logger.info(f"✅ Found via path check: {result.policy_url}")
+                        return result
 
+            # Both failed - fall back to DuckDuckGo
+            logger.info("🔍 Page scan and path checks failed. Trying DuckDuckGo...")
+            
             # Fallback 1: DuckDuckGo search with site: restriction
-            logger.info("⚠️ Parallel discovery failed. Trying DuckDuckGo search (site-specific)...")
+            logger.info("⚠️ Trying DuckDuckGo search (site-specific)...")
             result = await self._duckduckgo_search(domain, site_specific=True)
             if result and result.success:
                 logger.info(f"✅ Found via DuckDuckGo (site-specific): {result.policy_url}")
@@ -370,22 +388,22 @@ class DiscoveryService:
         try:
             from ddgs import DDGS
             
-            # All search term variants to try
+            # Search terms in PRIORITY ORDER (privacy policy is most important)
             search_terms = [
-                "privacy policy",
-                "terms of service", 
-                "terms and conditions",
-                "data protection",
-                "user agreement",
-                "privacy notice",
-                "privacy statement",
-                "legal notice",
-                "terms of use",
-                "cookie policy"
+                ("privacy policy", 100),      # Highest priority
+                ("privacy notice", 90),
+                ("privacy statement", 85),
+                ("data protection", 80),
+                ("terms of service", 50),     # Lower priority
+                ("terms and conditions", 45),
+                ("user agreement", 40),
+                ("terms of use", 35),
+                ("legal notice", 30),
+                ("cookie policy", 25)         # Lowest priority
             ]
             
-            async def search_single_term(term: str) -> Optional[tuple]:
-                """Search for a single term and return (term, results)."""
+            async def search_single_term(term: str, priority: int) -> Optional[tuple]:
+                """Search for a single term and return (priority, term, results)."""
                 try:
                     def search_sync():
                         if site_specific:
@@ -394,37 +412,52 @@ class DiscoveryService:
                             query = f"{domain} {term}"
                         
                         with DDGS() as ddgs:
-                            return list(ddgs.text(query, max_results=2))
+                            return list(ddgs.text(query, max_results=3))
                     
                     results = await asyncio.to_thread(search_sync)
                     if results:
-                        return (term, results)
+                        return (priority, term, results)
                 except Exception as e:
                     logger.debug(f"Search failed for '{term}': {e}")
                 return None
             
             # Launch ALL searches in parallel
             logger.info(f"🚀 Launching {len(search_terms)} parallel DuckDuckGo searches...")
-            search_tasks = [search_single_term(term) for term in search_terms]
+            search_tasks = [search_single_term(term, priority) for term, priority in search_terms]
             all_results = await asyncio.gather(*search_tasks, return_exceptions=True)
             
-            # Process results from all searches
+            # Filter and sort results by priority
+            valid_results = []
+            for result in all_results:
+                if result and not isinstance(result, Exception):
+                    valid_results.append(result)
+            
+            # Sort by priority (highest first)
+            valid_results.sort(key=lambda x: x[0], reverse=True)
+            
+            # Process results in priority order
             async with httpx.AsyncClient(
                 headers=self.headers,
                 follow_redirects=True,
                 timeout=10.0,
                 verify=False
             ) as client:
-                # Try each search result
-                for search_result in all_results:
-                    if search_result is None or isinstance(search_result, Exception):
-                        continue
-                    
-                    term, results = search_result
-                    
+                for priority, term, results in valid_results:
                     for result in results:
                         url = result.get('href') or result.get('link')
                         if not url:
+                            continue
+                        
+                        # Filter out junk URLs (videos, user posts, etc)
+                        url_lower = url.lower()
+                        junk_patterns = [
+                            '/videos/', '/video/', '/watch?', '/reel/',
+                            '/posts/', '/post/', '/status/', '/user/',
+                            '/photo/', '/photos/', '/groups/', '/events/'
+                        ]
+                        
+                        if any(pattern in url_lower for pattern in junk_patterns):
+                            logger.debug(f"Skipping junk URL: {url}")
                             continue
                         
                         try:
@@ -433,8 +466,8 @@ class DiscoveryService:
                                 text = self._extract_text(resp.text)
                                 
                                 # RELAXED validation - DDG found it, trust it
-                                if len(text) > 200:
-                                    logger.info(f"✅ DDG found via '{term}': {url} ({len(text)} chars)")
+                                if len(text) > 500:  # Higher threshold for search results
+                                    logger.info(f"✅ DDG found via '{term}' (priority={priority}): {url} ({len(text)} chars)")
                                     return DiscoveryResult(
                                         success=True,
                                         policy_text=text,
