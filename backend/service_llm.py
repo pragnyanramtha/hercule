@@ -17,22 +17,38 @@ class LLMService:
     """Service for analyzing privacy policies using Groq API."""
 
     def __init__(self):
-        """Initialize LLM client with environment variables."""
+        """Initialize LLM client with Groq API and rotation fallback."""
         self.groq_api_key = os.getenv("GROQ_API_KEY")
-
+        
+        # Model rotation order (try in sequence for resilience)
+        self.models = [
+            "moonshotai/kimi-k2-instruct-0905",
+            "moonshotai/kimi-k2-instruct",
+            "meta-llama/llama-4-maverick-17b-128e-instruct",
+            "openai/gpt-oss-120b",
+            "llama-3.3-70b-versatile",
+            "groq/compound"  # Last resort - has native web search
+        ]
+        
         if self.groq_api_key:
             self.test_mode = False
             self.provider = "groq"
             self.client = Groq(api_key=self.groq_api_key)
-            self.deployment = os.getenv("GROQ_MODEL", "llama-3.1-70b-versatile")
-            logger.info("🚀 Using Groq API")
-            logger.info(f"   Model: {self.deployment}")
+            self.current_model_index = 0
+            self.deployment = self.models[0]  # Start with first model
+            self.dev_mode = True  # Groq is always dev mode
+            logger.info("🚀 Using Groq API with model rotation")
+            logger.info(f"   Primary model: {self.deployment}")
+            logger.info(f"   Fallback models: {len(self.models) - 1}")
         else:
             # Test mode: No API key provided
             self.test_mode = True
             self.provider = "mock"
             self.client = None
             self.deployment = "mock_model"
+            self.dev_mode = True
+            self.models = ["mock_model"]
+            self.current_model_index = 0
             logger.warning("⚠️  Running in TEST MODE - using mock LLM responses (set GROQ_API_KEY to enable)")
 
     def _build_system_prompt(self) -> str:
@@ -273,7 +289,7 @@ Thank you,
 
     def analyze_policy(self, policy_text: str, url: str) -> AnalysisResult:
         """
-        Sends policy text to Groq LLM and returns structured analysis.
+        Sends policy text to Groq LLM with automatic model rotation fallback.
 
         Args:
             policy_text: The privacy policy text to analyze (max 50,000 chars)
@@ -283,7 +299,7 @@ Thank you,
             AnalysisResult object with score, summary, red flags, and action items
 
         Raises:
-            Exception: If LLM call fails or response is invalid
+            Exception: If all models fail
         """
         # If in test mode, return mock analysis
         if self.test_mode:
@@ -296,65 +312,92 @@ Thank you,
         if original_length > 50000:
             truncated_text += "\n[Text truncated at 50,000 characters]"
             logger.info(f"📄 Policy text truncated: {original_length:,} → 50,000 chars")
-        else:
-            logger.debug(f"📄 Policy text length: {original_length:,} chars")
 
-        try:
-            logger.debug(f"Calling Groq API with model: {self.deployment}")
-            start_time = time.time()
+        # Try each model in sequence until one succeeds
+        last_error = None
+        for attempt, model in enumerate(self.models):
+            try:
+                logger.debug(f"Attempt {attempt + 1}/{len(self.models)} - Trying model: {model}")
+                start_time = time.time()
 
-            response = self.client.chat.completions.create(
-                model=self.deployment,
-                messages=[
-                    {"role": "system", "content": self._build_system_prompt()},
-                    {"role": "user", "content": f"Analyze this privacy policy:\n\n{truncated_text}"}
-                ],
-                temperature=0.3,
-                max_tokens=2000,
-                response_format={"type": "json_object"}
-            )
+                # Special handling for groq/compound - it has web search
+                if model == "groq/compound":
+                    # Just send the URL and let it search and analyze
+                    response = self.client.chat.completions.create(
+                        model=model,
+                        messages=[
+                            {"role": "system", "content": self._build_system_prompt()},
+                            {"role": "user", "content": f"""Please use your web search capability to access and analyze the privacy policy at this URL: {url}
 
-            # Parse the response
-            api_duration = (time.time() - start_time) * 1000
-            logger.info(f"🤖 LLM API response received in {api_duration:.0f}ms")
+Search for and read the privacy policy, then provide your analysis in the required JSON format.
 
-            content = response.choices[0].message.content
-            logger.debug(f"Response content length: {len(content)} chars")
+URL to analyze: {url}"""}
+                        ],
+                        temperature=0.3,
+                        max_tokens=2000,
+                        response_format={"type": "json_object"}
+                    )
+                else:
+                    # Normal models - send the policy text
+                    response = self.client.chat.completions.create(
+                        model=model,
+                        messages=[
+                            {"role": "system", "content": self._build_system_prompt()},
+                            {"role": "user", "content": f"Analyze this privacy policy:\n\n{truncated_text}"}
+                        ],
+                        temperature=0.3,
+                        max_tokens=2000,
+                        response_format={"type": "json_object"}
+                    )
 
-            result_dict = json.loads(content)
+                # Parse the response
+                api_duration = (time.time() - start_time) * 1000
+                logger.info(f"✅ Model {model} succeeded in {api_duration:.0f}ms")
 
-            # Validate response structure
-            if not self._validate_response(result_dict):
-                logger.error(f"Invalid LLM response structure. Keys: {list(result_dict.keys())}")
-                raise ValueError("LLM response missing required fields")
+                content = response.choices[0].message.content
+                result_dict = json.loads(content)
 
-            # Log analysis results
-            score = result_dict["score"]
-            num_red_flags = len(result_dict.get("red_flags", []))
-            num_actions = len(result_dict.get("user_action_items", []))
-            logger.info(f"📊 Analysis results - Score: {score}/100, Red flags: {num_red_flags}, Actions: {num_actions}")
+                # Validate response structure
+                if not self._validate_response(result_dict):
+                    logger.warning(f"Invalid response from {model}, trying next model...")
+                    continue
 
-            # Convert to AnalysisResult model
-            action_items = [
-                ActionItem(**item) for item in result_dict.get("user_action_items", [])
-            ]
+                # Log analysis results
+                score = result_dict["score"]
+                num_red_flags = len(result_dict.get("red_flags", []))
+                num_actions = len(result_dict.get("user_action_items", []))
+                logger.info(f"📊 Analysis - Score: {score}/100, Red flags: {num_red_flags}, Actions: {num_actions}")
 
-            return AnalysisResult(
-                score=result_dict["score"],
-                summary=result_dict["summary"],
-                red_flags=result_dict.get("red_flags", []),
-                user_action_items=action_items,
-                timestamp=datetime.now(timezone.utc),
-                url=url
-            )
+                # Convert to AnalysisResult model
+                action_items = [
+                    ActionItem(**item) for item in result_dict.get("user_action_items", [])
+                ]
 
-        except json.JSONDecodeError as e:
-            logger.error(f"Failed to parse LLM JSON response: {e}")
-            logger.debug(f"Raw response: {content[:500]}...")
-            raise Exception(f"Failed to parse LLM response: {str(e)}")
-        except Exception as e:
-            logger.error(f"LLM analysis failed: {type(e).__name__}: {e}")
-            raise Exception(f"Failed to analyze policy: {str(e)}")
+                # Update current model for next request
+                self.deployment = model
+                self.current_model_index = attempt
+
+                return AnalysisResult(
+                    score=result_dict["score"],
+                    summary=result_dict["summary"],
+                    red_flags=result_dict.get("red_flags", []),
+                    user_action_items=action_items,
+                    timestamp=datetime.now(timezone.utc),
+                    url=url
+                )
+
+            except json.JSONDecodeError as e:
+                logger.warning(f"❌ Model {model} returned invalid JSON: {e}")
+                last_error = e
+                continue
+            except Exception as e:
+                logger.warning(f"❌ Model {model} failed: {type(e).__name__}: {e}")
+                last_error = e
+                continue
+
+        # All models failed
+        logger.error(f"💥 All {len(self.models)} models failed!")
+        raise Exception(f"All LLM models failed. Last error: {str(last_error)}")
 
     def _validate_response(self, response: Dict[str, Any]) -> bool:
         """
