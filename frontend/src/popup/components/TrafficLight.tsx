@@ -43,9 +43,9 @@ function TrafficLight({ score }: TrafficLightProps) {
   const color = getColor(score);
 
   const colors = {
-    emerald: { text: 'text-emerald-400', stroke: 'stroke-emerald-500', bg: 'bg-emerald-500/10 bg-green-500', testClass: 'bg-green-500' },
-    amber: { text: 'text-amber-400', stroke: 'stroke-amber-500', bg: 'bg-amber-500/10 bg-yellow-400', testClass: 'bg-yellow-400' },
-    rose: { text: 'text-rose-400', stroke: 'stroke-rose-500', bg: 'bg-rose-500/10 bg-red-500', testClass: 'bg-red-500' }
+    emerald: { text: 'text-emerald-400', stroke: 'stroke-emerald-500', bg: 'bg-emerald-500/10', testClass: 'bg-green-500' },
+    amber: { text: 'text-amber-400', stroke: 'stroke-amber-500', bg: 'bg-amber-500/10', testClass: 'bg-yellow-400' },
+    rose: { text: 'text-rose-400', stroke: 'stroke-rose-500', bg: 'bg-rose-500/10', testClass: 'bg-red-500' }
   };
 
   const theme = colors[color];

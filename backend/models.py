@@ -7,6 +7,12 @@ class ActionItem(BaseModel):
     text: str
     url: Optional[str] = None
     priority: str = Field(pattern="^(high|medium|low)$")
+    # Link to specific section in the privacy policy (with anchor/element id)
+    reference_url: Optional[str] = None
+    # mailto: link to contact the company's privacy team
+    mailto_link: Optional[str] = None
+    # Pre-generated email body that users can copy and send
+    email_body: Optional[str] = None
 
 
 class AnalysisResult(BaseModel):

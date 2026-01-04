@@ -54,10 +54,22 @@ Provide your analysis as a JSON object with this exact structure:
   "summary": "<plain-language summary of key points>",
   "red_flags": ["<concerning practice 1>", "<concerning practice 2>", ...],
   "user_action_items": [
-    {"text": "<actionable recommendation>", "url": "<optional link>", "priority": "<high|medium|low>"},
+    {
+      "text": "<actionable recommendation>",
+      "url": "<optional general link>",
+      "priority": "<high|medium|low>",
+      "reference_url": "<URL with #section-anchor pointing to relevant policy section>",
+      "mailto_link": "mailto:<company-privacy-email>?subject=<URL-encoded-subject>",
+      "email_body": "<pre-generated formal email message that user can copy and send>"
+    },
     ...
   ]
 }
+
+For each action item:
+- "reference_url": Create a URL pointing to the specific section of the privacy policy where this issue is mentioned. Use the policy URL with an anchor like #data-collection, #third-party-sharing, #user-rights, #data-retention, #contact-us, etc. Make educated guesses for common anchor names.
+- "mailto_link": Create a mailto: link to contact the company's privacy team. Use privacy@<domain>, dpo@<domain>, or support@<domain>. Include a URL-encoded subject line referencing the issue.
+- "email_body": Write a polite, formal email body (2-3 paragraphs) that the user can copy and send. Include: greeting, specific concern citing the policy, request for action/clarification, and closing. Use placeholders like [Your Name] where needed.
 
 Scoring guidelines:
 - 80-100: User-friendly, clear rights, strong privacy protections
@@ -135,32 +147,119 @@ Return ONLY the JSON object, no additional text."""
         if concern_count > 5 and positive_count < 3:
             red_flags.append("Limited user control over personal data")
 
+        # Extract domain from URL for email generation
+        domain = ""
+        if url:
+            try:
+                from urllib.parse import urlparse
+                parsed = urlparse(url)
+                domain = parsed.netloc.replace("www.", "")
+            except:
+                domain = "example.com"
+        
+        base_url = url if url else "https://example.com/privacy"
+
         # Generate action items based on score and content
         action_items = []
         if score < 70:
             action_items.append(ActionItem(
                 text="Review privacy settings and limit data sharing where possible",
-                priority="high"
+                priority="high",
+                reference_url=f"{base_url}#data-sharing",
+                mailto_link=f"mailto:privacy@{domain}?subject=Request%20to%20Limit%20Data%20Sharing",
+                email_body=f"""Dear Privacy Team,
+
+I am writing to request information about how I can limit the data sharing practices outlined in your privacy policy. After reviewing your policy, I have concerns about the extent of data collection and sharing with third parties.
+
+Specifically, I would like to:
+1. Understand what options I have to opt out of data sharing
+2. Request a list of third parties my data has been shared with
+3. Learn how I can minimize the data collected about me
+
+Please respond with the steps I can take to exercise my privacy rights.
+
+Thank you for your attention to this matter.
+
+Sincerely,
+[Your Name]"""
             ))
         if 'opt out' in text_lower or 'opt-out' in text_lower:
             action_items.append(ActionItem(
                 text="Look for opt-out options in your account settings",
                 url=url + "#settings" if url else None,
-                priority="medium"
+                priority="medium",
+                reference_url=f"{base_url}#opt-out",
+                mailto_link=f"mailto:privacy@{domain}?subject=Opt-Out%20Request",
+                email_body=f"""Dear Privacy Team,
+
+I am writing to exercise my right to opt out of certain data collection and sharing practices as mentioned in your privacy policy.
+
+Please process my opt-out request for:
+- Marketing communications
+- Data sharing with third-party advertisers
+- Cross-site tracking
+
+Please confirm once my opt-out preferences have been updated.
+
+Thank you,
+[Your Name]"""
             ))
         if score < 50:
             action_items.append(ActionItem(
                 text="Consider using privacy-focused alternatives to this service",
-                priority="high"
+                priority="high",
+                reference_url=f"{base_url}#data-collection",
+                mailto_link=f"mailto:privacy@{domain}?subject=Privacy%20Concerns%20Regarding%20Data%20Collection",
+                email_body=f"""Dear Privacy Team,
+
+I am writing to express my concerns regarding the data collection practices outlined in your privacy policy. The extent of data collection appears to be quite extensive and I would like clarification on the following:
+
+1. What is the legal basis for collecting this data?
+2. Is all this data collection strictly necessary for providing the service?
+3. How long is my personal data retained?
+
+I would appreciate a detailed response addressing these concerns.
+
+Best regards,
+[Your Name]"""
             ))
             action_items.append(ActionItem(
                 text="Use a VPN and privacy browser extensions when using this service",
-                priority="medium"
+                priority="medium",
+                reference_url=f"{base_url}#tracking",
+                mailto_link=f"mailto:privacy@{domain}?subject=Question%20About%20Tracking%20Practices",
+                email_body=f"""Dear Privacy Team,
+
+I have reviewed your privacy policy and noticed references to tracking technologies. I would like to better understand:
+
+1. What tracking technologies are used on your platform?
+2. How can I disable or limit this tracking?
+3. Do you honor Do Not Track browser signals?
+
+Thank you for your transparency.
+
+Regards,
+[Your Name]"""
             ))
         if 'delete' in text_lower:
             action_items.append(ActionItem(
                 text="Exercise your right to delete your data if you no longer use the service",
-                priority="low"
+                priority="low",
+                reference_url=f"{base_url}#user-rights",
+                mailto_link=f"mailto:privacy@{domain}?subject=Data%20Deletion%20Request",
+                email_body=f"""Dear Privacy Team,
+
+Pursuant to my rights under applicable data protection laws, I am writing to request the deletion of all personal data you hold about me.
+
+Please confirm:
+1. Receipt of this deletion request
+2. The timeline for completing the deletion
+3. Any data that cannot be deleted and the reason why
+
+Please send confirmation once my data has been fully deleted from your systems.
+
+Thank you,
+[Your Name]"""
             ))
 
         return AnalysisResult(

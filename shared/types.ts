@@ -24,6 +24,12 @@ export interface ActionItem {
   url?: string;
   /** Priority level: high (urgent), medium (recommended), low (optional) */
   priority: Priority;
+  /** Link to specific section in the privacy policy (with anchor/element id) */
+  reference_url?: string;
+  /** mailto: link to contact the company's privacy team */
+  mailto_link?: string;
+  /** Pre-generated email body that users can copy and send */
+  email_body?: string;
 }
 
 /**

@@ -41,15 +41,32 @@ class DiscoveryService:
             'Accept-Language': 'en-US,en;q=0.5',
         }
         
-        # 26 common privacy policy paths
+        
+        # 40+ common privacy policy paths
         self.common_paths = [
+            # Standard privacy paths
             '/privacy', '/privacy-policy', '/privacy_policy', '/privacypolicy',
-            '/legal/privacy', '/legal/privacy-policy', '/policies/privacy',
-            '/policies/privacy-policy', '/about/privacy', '/info/privacy',
-            '/terms/privacy', '/en/privacy', '/us/privacy', '/privacy.html',
-            '/privacy-policy.html', '/legal', '/legal/terms', '/terms',
-            '/terms-of-service', '/tos', '/terms-and-conditions',
-            '/data-privacy', '/data-protection', '/gdpr', '/ccpa', '/cookie-policy',
+            '/privacy-notice', '/privacy-statement',
+            # Legal paths
+            '/legal/privacy', '/legal/privacy-policy', '/legal/data-privacy', '/legal', '/legal/terms',
+            # Policy paths  
+            '/policies/privacy', '/policies/privacy-policy', '/policy/privacy',
+            # About/Info paths
+            '/about/privacy', '/about/legal', '/info/privacy', '/company/privacy',
+            # Localized
+            '/en/privacy', '/en-us/privacy', '/us/privacy', '/global/privacy',
+            # Data protection
+            '/data-privacy', '/data-protection', '/gdpr', '/ccpa',
+            # Terms
+            '/terms', '/terms-of-service', '/tos', '/terms-and-conditions', '/terms/privacy',
+            # HTML files
+            '/privacy.html', '/privacy-policy.html', '/legal.html',
+            # Support paths
+            '/help/privacy', '/support/privacy', '/faq/privacy',
+            # Security
+            '/security/privacy', '/security',
+            # Other
+            '/cookie-policy', '/cookies', '/user-agreement', '/compliance/privacy'
         ]
         
         # Keywords for link detection
@@ -105,12 +122,43 @@ class DiscoveryService:
                     logger.info(f"✅ Found via {result.method}: {result.policy_url}")
                     return result
 
-            # Fallback: DuckDuckGo search (only if parallel methods failed)
-            logger.info("⚠️ Parallel discovery failed. Trying DuckDuckGo search...")
-            result = await self._duckduckgo_search(domain)
+            # Fallback 1: DuckDuckGo search with site: restriction
+            logger.info("⚠️ Parallel discovery failed. Trying DuckDuckGo search (site-specific)...")
+            result = await self._duckduckgo_search(domain, site_specific=True)
             if result and result.success:
-                logger.info(f"✅ Found via DuckDuckGo: {result.policy_url}")
+                logger.info(f"✅ Found via DuckDuckGo (site-specific): {result.policy_url}")
                 return result
+
+            # Fallback 2: Broader DuckDuckGo search (without site: restriction)
+            logger.info("⚠️  Site-specific search failed. Trying broader DuckDuckGo search...")
+            result = await self._duckduckgo_search(domain, site_specific=False)
+            if result and result.success:
+                logger.info(f"✅ Found via DuckDuckGo (broad): {result.policy_url}")
+                return result
+
+            # Final Fallback: Return homepage content as last resort
+            # Better to analyze SOMETHING than nothing
+            logger.warning(f"⚠️ All discovery methods exhausted. Falling back to homepage content...")
+            try:
+                async with httpx.AsyncClient(
+                    headers=self.headers,
+                    follow_redirects=True,
+                    timeout=10.0,
+                    verify=False
+                ) as client:
+                    resp = await client.get(base_url)
+                    if resp.status_code == 200:
+                        text = self._extract_text(resp.text)
+                        if len(text) > 100:  # At least some content
+                            logger.info(f"📄 Using homepage content as fallback ({len(text)} chars)")
+                            return DiscoveryResult(
+                                success=True,
+                                policy_text=text,
+                                policy_url=base_url,
+                                method='homepage_fallback'
+                            )
+            except Exception as e:
+                logger.error(f"Homepage fallback failed: {e}")
 
             logger.warning(f"❌ Could not find privacy policy for {domain}")
             return DiscoveryResult(
@@ -163,15 +211,38 @@ class DiscoveryService:
                 return None
             
             text = self._extract_text(resp.text)
+            logger.debug(f"Path {path} returned {len(text)} chars")
+            
+            # Strategy 1: Strict validation
             if self._looks_like_privacy_policy(text):
+                logger.info(f"✅ Path {path} looks like privacy policy ({len(text)} chars)")
                 return DiscoveryResult(
                     success=True,
                     policy_text=text,
                     policy_url=str(resp.url),
                     method=f'path:{path}'
                 )
+            
+            # Strategy 2: Relaxed validation for privacy-related paths
+            # If the path itself suggests it's a privacy page, accept it even if content is weak
+            privacy_indicators = ['privacy', 'gdpr', 'ccpa', 'data-protection']
+            path_lower = path.lower()
+            
+            if any(indicator in path_lower for indicator in privacy_indicators):
+                # Check if it has at least SOME privacy-related content (very relaxed)
+                if len(text) > 200 and 'privacy' in text.lower():
+                    logger.info(f"✅ Path {path} accepted via relaxed validation ({len(text)} chars)")
+                    return DiscoveryResult(
+                        success=True,
+                        policy_text=text,
+                        policy_url=str(resp.url),
+                        method=f'path:{path}:relaxed'
+                    )
+            
+            logger.debug(f"Path {path} doesn't look like privacy policy (too short or missing keywords)")
             return None
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Path {path} failed: {e}")
             return None
 
     async def _scrape_page_for_links(
@@ -248,8 +319,8 @@ class DiscoveryService:
         
         return score
 
-    async def _duckduckgo_search(self, domain: str) -> Optional[DiscoveryResult]:
-        """Search DuckDuckGo for the privacy policy (last resort)."""
+    async def _duckduckgo_search(self, domain: str, site_specific: bool = True) -> Optional[DiscoveryResult]:
+        """Search DuckDuckGo for the privacy policy."""
         try:
             try:
                 from ddgs import DDGS
@@ -257,9 +328,14 @@ class DiscoveryService:
                 from duckduckgo_search import DDGS
             
             def search_sync():
-                query = f"site:{domain} privacy policy"
+                if site_specific:
+                    query = f"site:{domain} privacy policy"
+                else:
+                    # Broader search - useful for subdomains or unlisted sites
+                    query = f"{domain} privacy policy"
+                
                 with DDGS() as ddgs:
-                    return list(ddgs.text(query, max_results=3))
+                    return list(ddgs.text(query, max_results=5))  # Get more results
             
             results = await asyncio.to_thread(search_sync)
             
@@ -281,21 +357,24 @@ class DiscoveryService:
                         resp = await client.get(url)
                         if resp.status_code == 200:
                             text = self._extract_text(resp.text)
-                            if self._looks_like_privacy_policy(text):
+                            
+                            # RELAXED validation for search results - if DDG found it, trust it more
+                            if len(text) > 200:  # Just need some content
+                                logger.info(f"🔍 DuckDuckGo result looks valid ({len(text)} chars)")
                                 return DiscoveryResult(
                                     success=True,
                                     policy_text=text,
                                     policy_url=str(resp.url),
                                     method='duckduckgo'
                                 )
-                    except Exception:
+                    except Exception as e:
+                        logger.debug(f"Failed to fetch DDG result {url}: {e}")
                         continue
-            
-            return None
             
         except Exception as e:
             logger.error(f"DuckDuckGo search failed: {e}")
-            return None
+        return None
+
 
     def _extract_text(self, html: str) -> str:
         """Extract clean text from HTML."""

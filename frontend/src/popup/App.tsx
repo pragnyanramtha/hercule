@@ -32,7 +32,7 @@ function AppContent() {
 
       // Get current tab URL
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-      
+
       if (!tab.url) {
         setError('Could not access current tab');
         setLoading({ phase: 'error', message: '' });
@@ -41,7 +41,7 @@ function AppContent() {
 
       // Check for restricted pages
       if (tab.url.startsWith('chrome://') || tab.url.startsWith('chrome-extension://') ||
-          tab.url.startsWith('about:') || tab.url.startsWith('edge://')) {
+        tab.url.startsWith('about:') || tab.url.startsWith('edge://')) {
         setError('Cannot analyze browser internal pages. Navigate to a website first.');
         setLoading({ phase: 'error', message: '' });
         return;
@@ -49,7 +49,7 @@ function AppContent() {
 
       // Send URL to backend - it handles everything (discovery + analysis)
       setLoading({ phase: 'discovering', message: 'Searching for privacy policy...' });
-      
+
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 60000); // 60s timeout for full flow
 
@@ -74,7 +74,7 @@ function AppContent() {
 
       } catch (err) {
         clearTimeout(timeoutId);
-        
+
         if (err instanceof Error) {
           if (err.name === 'AbortError') {
             setError('Request timed out. The site may be slow or blocking requests.');
@@ -110,17 +110,20 @@ function AppContent() {
         <div className="flex items-center gap-3">
           <div className="relative group">
             <div className="absolute inset-0 bg-indigo-500 blur-lg opacity-20 group-hover:opacity-40 transition-opacity"></div>
-            <div className="relative w-8 h-8 rounded-xl bg-gradient-to-br from-indigo-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-indigo-500/20 border border-white/10">
-              <Icons.Shield className="w-5 h-5 text-white" />
+            <div className="relative w-8 h-8 rounded-xl flex items-center justify-center shadow-lg shadow-indigo-500/20 border border-white/10 overflow-hidden bg-slate-900">
+              <img src="/icons/logo.png" alt="Hercule Logo" className="w-full h-full object-cover" />
             </div>
           </div>
           <h1 className="text-xl font-bold bg-gradient-to-r from-white via-indigo-100 to-indigo-200 bg-clip-text text-transparent tracking-tight">
             Hercule
           </h1>
         </div>
-        <div className="px-2 py-0.5 rounded-full bg-slate-800/50 border border-slate-700/50">
-          <span className="text-[10px] font-mono text-slate-400 font-medium">v1.2</span>
-        </div>
+        <button
+          className="p-2 rounded-xl bg-slate-800/50 border border-slate-700/50 hover:bg-slate-700/50 hover:border-slate-600/50 transition-all text-slate-400 hover:text-indigo-400 group"
+          title="Settings"
+        >
+          <Icons.Settings className="w-5 h-5 group-hover:rotate-90 transition-transform duration-500" />
+        </button>
       </header>
 
       <main className="p-6">
@@ -140,8 +143,8 @@ function AppContent() {
             </p>
 
             <p className="text-slate-500 text-xs mb-6">
-              {loading.phase === 'discovering' 
-                ? 'Checking common paths, scraping links, searching...' 
+              {loading.phase === 'discovering'
+                ? 'Checking common paths, scraping links, searching...'
                 : 'AI is analyzing the policy...'}
             </p>
 

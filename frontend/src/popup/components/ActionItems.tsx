@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { ActionItem } from '../../../../shared/types';
 import { Icons } from './Icons';
 
@@ -16,6 +17,18 @@ function sortByPriority(items: ActionItem[]): ActionItem[] {
 }
 
 function ActionItems({ actionItems }: ActionItemsProps) {
+  const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
+
+  const handleCopyEmail = async (emailBody: string, index: number) => {
+    try {
+      await navigator.clipboard.writeText(emailBody);
+      setCopiedIndex(index);
+      setTimeout(() => setCopiedIndex(null), 2000);
+    } catch (err) {
+      console.error('Failed to copy email:', err);
+    }
+  };
+
   if (actionItems.length === 0) {
     return (
       <div className="bg-sky-950/20 border border-sky-500/10 rounded-3xl p-6 backdrop-blur-sm">
@@ -34,7 +47,7 @@ function ActionItems({ actionItems }: ActionItemsProps) {
       <h2 className="text-sm font-semibold mb-4 text-sky-400 flex items-center gap-2 uppercase tracking-wide">
         <Icons.Bolt className="w-4 h-4" /> Action Items
       </h2>
-      <ul className="space-y-3">
+      <ul className="space-y-4">
         {sortedItems.map((item, index) => {
           // Badge styles for dark mode
           let badgeClass = "bg-slate-800 text-slate-300 border-slate-700";
@@ -54,26 +67,86 @@ function ActionItems({ actionItems }: ActionItemsProps) {
           return (
             <li
               key={index}
-              className={`flex items-start gap-4 text-sm bg-slate-900/40 rounded-2xl p-4 border-l-4 ${borderClass} hover:bg-slate-800/40 transition-colors`}
+              className={`flex flex-col gap-3 text-sm bg-slate-900/40 rounded-2xl p-4 border-l-4 ${borderClass} hover:bg-slate-800/40 transition-colors`}
             >
+              {/* Header with priority badge and text */}
               <div className="flex-1 min-w-0">
                 <div className="flex justify-between items-start mb-2">
                   <span className={`inline-block px-2.5 py-1 text-[10px] uppercase font-bold tracking-wider rounded-md border ${badgeClass}`}>
                     {item.priority}
                   </span>
                 </div>
-                {item.url ? (
+                <span className="text-slate-200 leading-relaxed block font-medium">{item.text}</span>
+              </div>
+
+              {/* Action Links */}
+              <div className="flex flex-wrap gap-2 mt-1">
+                {/* View in Policy link */}
+                {item.reference_url && (
+                  <a
+                    href={item.reference_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-indigo-500/10 text-indigo-300 border border-indigo-500/20 hover:bg-indigo-500/20 hover:border-indigo-500/30 transition-all"
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                    </svg>
+                    View in Policy
+                  </a>
+                )}
+
+                {/* Contact Company link */}
+                {item.mailto_link && (
+                  <a
+                    href={item.mailto_link}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-violet-500/10 text-violet-300 border border-violet-500/20 hover:bg-violet-500/20 hover:border-violet-500/30 transition-all"
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                    </svg>
+                    Contact Company
+                  </a>
+                )}
+
+                {/* Copy Email Body button */}
+                {item.email_body && (
+                  <button
+                    onClick={() => handleCopyEmail(item.email_body!, index)}
+                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border transition-all ${copiedIndex === index
+                        ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+                        : 'bg-slate-700/30 text-slate-300 border-slate-600/30 hover:bg-slate-600/30 hover:border-slate-500/30'
+                      }`}
+                  >
+                    {copiedIndex === index ? (
+                      <>
+                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                        </svg>
+                        Copied!
+                      </>
+                    ) : (
+                      <>
+                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                        </svg>
+                        Copy Email
+                      </>
+                    )}
+                  </button>
+                )}
+
+                {/* Legacy URL support */}
+                {item.url && !item.reference_url && (
                   <a
                     href={item.url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="text-sky-400 hover:text-sky-300 hover:underline leading-relaxed block font-medium flex items-center gap-1"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-sky-500/10 text-sky-300 border border-sky-500/20 hover:bg-sky-500/20 hover:border-sky-500/30 transition-all"
                   >
-                    {item.text}
                     <Icons.ArrowRight className="w-3 h-3" />
+                    Learn More
                   </a>
-                ) : (
-                  <span className="text-slate-300 leading-relaxed block font-normal">{item.text}</span>
                 )}
               </div>
             </li>
@@ -85,3 +158,4 @@ function ActionItems({ actionItems }: ActionItemsProps) {
 }
 
 export default ActionItems;
+
