@@ -5,6 +5,7 @@ FastAPI backend for analyzing privacy policies using Groq LLM.
 import os
 import logging
 import time
+import asyncio
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -123,22 +124,73 @@ async def analyze_policy(request: AnalyzeRequest):
     policy_text = request.policy_text
     policy_url = request.url
     
+    
     # If no policy text provided, use aggressive discovery
     if not policy_text and policy_url:
         logger.info(f"🔍 No policy text provided. Starting aggressive discovery for: {policy_url}")
         
-        discovery_result = await discovery_service.discover_and_extract(policy_url)
+        try:
+            # Try discovery with 10-second timeout (reduced from 20s)
+            discovery_result = await asyncio.wait_for(
+                discovery_service.discover_and_extract(policy_url),
+                timeout=10.0
+            )
+            
+            if not discovery_result.success or not discovery_result.policy_text:
+                logger.warning(f"❌ Discovery failed for {policy_url}: {discovery_result.error}")
+                raise ValueError("Discovery unsuccessful")
+            
+            policy_text = discovery_result.policy_text
+            policy_url = discovery_result.policy_url or policy_url
+            logger.info(f"✅ Discovery successful via {discovery_result.method}: {policy_url}")
+            
+        except (asyncio.TimeoutError, ValueError) as e:
+            # Discovery failed or timed out - use groq/compound with web search
+            if isinstance(e, asyncio.TimeoutError):
+                logger.warning(f"⏱️ Discovery timeout after 10s. Using groq/compound with web search...")
+            else:
+                logger.warning(f"❌ Discovery failed. Using groq/compound with web search...")
+            policy_text = None  # Let groq/compound fetch it via web search
+        except Exception as e:
+            # Unexpected error - use groq/compound with web search
+            logger.warning(f"❌ Discovery error: {e}. Using groq/compound with web search...")
+            policy_text = None
+    
+    # If we still don't have policy text, use groq/compound with web search
+    if not policy_text and policy_url:
+        logger.info(f"🌐 Using groq/compound to analyze URL via web search: {policy_url}")
         
-        if not discovery_result.success or not discovery_result.policy_text:
-            logger.warning(f"❌ Discovery failed for {policy_url}: {discovery_result.error}")
+        # Force groq/compound model for this request
+        original_models = llm_service.models
+        llm_service.models = ["groq/compound"]  # Only use compound for web search
+        
+        try:
+            # Call LLM with URL only - groq/compound will search and analyze
+            result = llm_service.analyze_policy("", policy_url)  # Empty text, compound will search
+            logger.info(f"✨ Analysis via groq/compound complete - Score: {result.score}/100")
+            
+            # Restore original models
+            llm_service.models = original_models
+            
+            # Skip caching and return directly
+            return result
+        except Exception as e:
+            llm_service.models = original_models
+            error_msg = str(e)
+            
+            # Check if it's a rate limit error
+            if "rate_limit" in error_msg.lower() or "429" in error_msg:
+                logger.error(f"💸 Rate limit reached - try again in a few seconds")
+                raise HTTPException(
+                    status_code=429,
+                    detail="Rate limit exceeded. Please try again in a few seconds."
+                )
+            
+            logger.error(f"❌ groq/compound analysis failed: {e}")
             raise HTTPException(
                 status_code=404,
-                detail=f"Could not find privacy policy for this website. {discovery_result.error or ''}"
+                detail=f"Could not find or analyze privacy policy. Discovery timed out and fallback failed: {error_msg[:100]}"
             )
-        
-        policy_text = discovery_result.policy_text
-        policy_url = discovery_result.policy_url or policy_url
-        logger.info(f"✅ Discovery successful via {discovery_result.method}: {policy_url}")
     
     # Validate we have policy text
     if not policy_text:

@@ -147,45 +147,13 @@ class DiscoveryService:
                 logger.info(f"✅ Found via DuckDuckGo (site-specific): {result.policy_url}")
                 return result
 
-            # Fallback 2: Broader DuckDuckGo search (without site: restriction)
-            logger.info("⚠️  Site-specific search failed. Trying broader DuckDuckGo search...")
-            result = await self._duckduckgo_search(domain, site_specific=False)
-            if result and result.success:
-                logger.info(f"✅ Found via DuckDuckGo (broad): {result.policy_url}")
-                return result
-
-            # Final Fallback: Return homepage content as last resort
-            # Better to analyze SOMETHING than nothing
-            logger.warning(f"⚠️ All discovery methods exhausted. Falling back to homepage content...")
-            try:
-                async with httpx.AsyncClient(
-                    headers=self.headers,
-                    follow_redirects=True,
-                    timeout=10.0,
-                    verify=False
-                ) as client:
-                    resp = await client.get(base_url)
-                    if resp.status_code == 200:
-                        text = self._extract_text(resp.text)
-                        # ALWAYS return if we got ANY text - no minimum requirement
-                        if text and len(text.strip()) > 0:
-                            logger.info(f"📄 Using homepage as absolute fallback ({len(text)} chars)")
-                            return DiscoveryResult(
-                                success=True,
-                                policy_text=text,
-                                policy_url=base_url,
-                                method='homepage_fallback'
-                            )
-            except Exception as e:
-                logger.error(f"Homepage fallback failed: {e}")
-
-            # This should NEVER be reached, but just in case return a minimal result
-            logger.error(f"❌ CRITICAL: All fallbacks failed for {domain}")
+            # If site-specific search failed, we GIVE UP and let groq/compound handle it
+            # We do NOT want to do broad searches (finds random ads) or return homepage content
+            logger.warning("❌ All discovery methods failed. Letting groq/compound handle it via web search.")
             return DiscoveryResult(
-                success=True,  # Mark as success so analysis proceeds
-                policy_text=f"Unable to find privacy policy for {domain}. This is a placeholder for analysis.",
-                policy_url=base_url,
-                method='error_fallback'
+                success=False,
+                error="Could not find privacy policy via standard methods",
+                method="failed"
             )
 
 
@@ -384,10 +352,11 @@ class DiscoveryService:
         return score
 
     async def _duckduckgo_search(self, domain: str, site_specific: bool = True) -> Optional[DiscoveryResult]:
-        """Search DuckDuckGo with ALL query variations IN PARALLEL."""
+        """
+        Search DuckDuckGo using direct HTML scraping.
+        This ensures we ONLY hit DuckDuckGo and avoid the 'ddgs' library trying random backends (Wikipedia/etc).
+        """
         try:
-            from ddgs import DDGS
-            
             # Search terms in PRIORITY ORDER (privacy policy is most important)
             search_terms = [
                 ("privacy policy", 100),      # Highest priority
@@ -402,27 +371,48 @@ class DiscoveryService:
                 ("cookie policy", 25)         # Lowest priority
             ]
             
+            # Browser headers to avoid 403s
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+                "Referer": "https://html.duckduckgo.com/",
+                "Origin": "https://html.duckduckgo.com",
+                "Content-Type": "application/x-www-form-urlencoded"
+            }
+
             async def search_single_term(term: str, priority: int) -> Optional[tuple]:
-                """Search for a single term and return (priority, term, results)."""
+                """Search for a single term using manual HTML scraping."""
                 try:
-                    def search_sync():
-                        if site_specific:
-                            query = f"site:{domain} {term}"
-                        else:
-                            query = f"{domain} {term}"
-                        
-                        with DDGS() as ddgs:
-                            return list(ddgs.text(query, max_results=3))
+                    query = f"site:{domain} {term}" if site_specific else f"{domain} {term}"
                     
-                    results = await asyncio.to_thread(search_sync)
-                    if results:
-                        return (priority, term, results)
+                    async with httpx.AsyncClient(headers=headers, timeout=5.0, verify=False) as search_client:
+                        # Use POST to html.duckduckgo.com - it's more robust than GET for scraping
+                        resp = await search_client.post(
+                            "https://html.duckduckgo.com/html/",
+                            data={"q": query},
+                        )
+                        
+                        if resp.status_code == 200:
+                            results = []
+                            soup = BeautifulSoup(resp.text, 'html.parser')
+                            
+                            # Parse result links (class 'result__a' in simple HTML version)
+                            for link in soup.select('.result__a'):
+                                href = link.get('href')
+                                if href and not 'duckduckgo.com' in href:
+                                    results.append(href)
+                                    if len(results) >= 2: # Keep it tight
+                                        break
+                            
+                            if results:
+                                return (priority, term, results)
+                                
                 except Exception as e:
-                    logger.debug(f"Search failed for '{term}': {e}")
+                    logger.debug(f"Manual search failed for '{term}': {e}")
                 return None
             
             # Launch ALL searches in parallel
-            logger.info(f"🚀 Launching {len(search_terms)} parallel DuckDuckGo searches...")
+            logger.info(f"🚀 Launching {len(search_terms)} parallel DuckDuckGo (HTML) searches...")
             search_tasks = [search_single_term(term, priority) for term, priority in search_terms]
             all_results = await asyncio.gather(*search_tasks, return_exceptions=True)
             
@@ -439,21 +429,20 @@ class DiscoveryService:
             async with httpx.AsyncClient(
                 headers=self.headers,
                 follow_redirects=True,
-                timeout=10.0,
+                timeout=5.0, # Fast check
                 verify=False
             ) as client:
                 for priority, term, results in valid_results:
-                    for result in results:
-                        url = result.get('href') or result.get('link')
-                        if not url:
-                            continue
+                    for url in results:
+                        if not url: continue
                         
                         # Filter out junk URLs (videos, user posts, etc)
                         url_lower = url.lower()
                         junk_patterns = [
                             '/videos/', '/video/', '/watch?', '/reel/',
                             '/posts/', '/post/', '/status/', '/user/',
-                            '/photo/', '/photos/', '/groups/', '/events/'
+                            '/photo/', '/photos/', '/groups/', '/events/',
+                            'linkedin.com', 'facebook.com', 'twitter.com', 'instagram.com'
                         ]
                         
                         if any(pattern in url_lower for pattern in junk_patterns):
