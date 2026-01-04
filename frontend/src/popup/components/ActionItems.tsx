@@ -1,4 +1,3 @@
-import { useState } from 'react';
 import { ActionItem } from '../../../../shared/types';
 import { Icons } from './Icons';
 
@@ -17,18 +16,6 @@ function sortByPriority(items: ActionItem[]): ActionItem[] {
 }
 
 function ActionItems({ actionItems }: ActionItemsProps) {
-  const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
-
-  const handleCopyEmail = async (emailBody: string, index: number) => {
-    try {
-      await navigator.clipboard.writeText(emailBody);
-      setCopiedIndex(index);
-      setTimeout(() => setCopiedIndex(null), 2000);
-    } catch (err) {
-      console.error('Failed to copy email:', err);
-    }
-  };
-
   if (actionItems.length === 0) {
     return (
       <div className="bg-sky-950/20 border border-sky-500/10 rounded-3xl p-6 backdrop-blur-sm">
@@ -100,6 +87,13 @@ function ActionItems({ actionItems }: ActionItemsProps) {
                 {item.mailto_link && (
                   <a
                     href={item.mailto_link}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={(e) => {
+                      // Use window.location to ensure user gesture is preserved
+                      e.preventDefault();
+                      window.location.href = item.mailto_link!;
+                    }}
                     className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-violet-500/10 text-violet-300 border border-violet-500/20 hover:bg-violet-500/20 hover:border-violet-500/30 transition-all"
                   >
                     <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -107,33 +101,6 @@ function ActionItems({ actionItems }: ActionItemsProps) {
                     </svg>
                     Contact Company
                   </a>
-                )}
-
-                {/* Copy Email Body button */}
-                {item.email_body && (
-                  <button
-                    onClick={() => handleCopyEmail(item.email_body!, index)}
-                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border transition-all ${copiedIndex === index
-                        ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
-                        : 'bg-slate-700/30 text-slate-300 border-slate-600/30 hover:bg-slate-600/30 hover:border-slate-500/30'
-                      }`}
-                  >
-                    {copiedIndex === index ? (
-                      <>
-                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                        </svg>
-                        Copied!
-                      </>
-                    ) : (
-                      <>
-                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                        </svg>
-                        Copy Email
-                      </>
-                    )}
-                  </button>
                 )}
 
                 {/* Legacy URL support */}
