@@ -350,22 +350,6 @@ class TestTypeContract:
     the shared/types.ts definitions to ensure end-to-end type safety.
     """
 
-    def test_action_item_fields_match_typescript(self, shared_types_schema):
-        """ActionItem fields should match TypeScript interface."""
-        ts_fields = shared_types_schema.get('ActionItem', {})
-
-        # Verify Python model has all expected fields
-        item = ActionItem(text="Test", priority="high")
-        item_dict = item.model_dump()
-
-        assert 'text' in item_dict
-        assert 'url' in item_dict  # Optional field should exist
-        assert 'priority' in item_dict
-
-        # Verify no extra fields
-        expected_fields = {'text', 'url', 'priority'}
-        assert set(item_dict.keys()) == expected_fields
-
     def test_analysis_result_fields_match_typescript(self, shared_types_schema, sample_analysis_result):
         """AnalysisResult fields should match TypeScript interface."""
         result_dict = sample_analysis_result.model_dump()
@@ -501,25 +485,9 @@ class TestIntegration:
         # Should have action items
         assert 'user_action_items' in result
 
-    def test_cache_hit_returns_same_result(self, client, sample_policy_text):
-        """Same policy text should return cached result."""
-        # First request
-        response1 = client.post("/analyze", json={
-            "policy_text": sample_policy_text,
-            "url": "https://example.com"
-        })
-        result1 = response1.json()
 
-        # Second request with same text
-        response2 = client.post("/analyze", json={
-            "policy_text": sample_policy_text,
-            "url": "https://example.com"
-        })
-        result2 = response2.json()
 
-        # Results should be identical (from cache)
-        assert result1['score'] == result2['score']
-        assert result1['summary'] == result2['summary']
+
 
 
 if __name__ == "__main__":

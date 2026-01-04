@@ -87,12 +87,10 @@ function ActionItems({ actionItems }: ActionItemsProps) {
                 {item.mailto_link && (
                   <a
                     href={item.mailto_link}
-                    target="_blank"
-                    rel="noopener noreferrer"
                     onClick={(e) => {
-                      // Use window.location to ensure user gesture is preserved
                       e.preventDefault();
-                      window.location.href = item.mailto_link!;
+                      // Open mailto link in a new tab - this triggers the default email client
+                      window.open(item.mailto_link, '_blank');
                     }}
                     className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-violet-500/10 text-violet-300 border border-violet-500/20 hover:bg-violet-500/20 hover:border-violet-500/30 transition-all"
                   >

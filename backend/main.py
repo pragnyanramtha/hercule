@@ -203,14 +203,11 @@ async def analyze_policy(request: AnalyzeRequest):
     text_hash = cache_manager.generate_key(policy_text)
     logger.info(f"📝 Analyzing policy from: {policy_url or 'direct text'} (hash: {text_hash[:12]}...)")
     
-    # Check cache (skip in dev mode for easier testing)
-    if not llm_service.dev_mode:
-        cached_result = cache_manager.get(text_hash)
-        if cached_result is not None:
-            logger.info(f"💾 Cache HIT - returning cached result (score: {cached_result.score})")
-            return cached_result
-    else:
-        logger.debug("🔧 Dev mode: Skipping cache check")
+    # Check cache (ALWAYS check cache as requested)
+    cached_result = cache_manager.get(text_hash)
+    if cached_result is not None:
+        logger.info(f"💾 Cache HIT - returning cached result (score: {cached_result.score})")
+        return cached_result
     
     logger.info(f"🔍 Cache MISS - calling {llm_service.provider.upper()} LLM...")
     
@@ -230,12 +227,9 @@ async def analyze_policy(request: AnalyzeRequest):
         logger.error(f"❌ Analysis error: {type(e).__name__}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to analyze policy: {type(e).__name__}")
     
-    # Cache result (skip in dev mode)
-    if not llm_service.dev_mode:
-        cache_manager.set(text_hash, result)
-        logger.debug(f"💾 Result cached (cache size: {cache_manager.size()})")
-    else:
-        logger.debug("🔧 Dev mode: Skipping cache storage")
+    # Cache result (ALWAYS cache)
+    cache_manager.set(text_hash, result)
+    logger.debug(f"💾 Result cached (cache size: {cache_manager.size()})")
     
     return result
 
