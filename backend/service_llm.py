@@ -76,7 +76,7 @@ Provide your analysis as a JSON object with this exact structure:
       "url": "<optional general link>",
       "priority": "<high|medium|low>",
       "reference_url": "<URL with #section-anchor pointing to relevant policy section>",
-      "mailto_link": "mailto:<company-email>?subject=<URL-encoded-subject>&body=<URL-encoded-email-body>",
+      "mailto_link": "https://mail.google.com/mail/?view=cm&fs=1&to=<company-email>&su=<URL-encoded-subject>&body=<URL-encoded-email-body>",
       "email_body": "<pre-generated formal email message>"
     },
     ...
@@ -86,7 +86,7 @@ Provide your analysis as a JSON object with this exact structure:
 For each action item:
 - "reference_url": Create a URL pointing to the specific section of the privacy policy. Use anchors like #data-collection, #third-party-sharing, #user-rights, etc.
 - "email_body": Write a PERSONALIZED, polite formal email (2-3 paragraphs) tailored to the SPECIFIC privacy concern you found. Reference specific clauses or practices from THIS policy. Include: greeting, specific concern with details, request for action/clarification, and closing. Use [Your Name] as placeholder.
-- "mailto_link": Create a full mailto URL including both subject AND body. Format: "mailto:privacy@<domain>?subject=<URL-encoded subject>&body=<URL-encoded email_body>". The body parameter must contain the SAME content as email_body field but URL-encoded. Use %20 for spaces, %0A for newlines.
+- "mailto_link": Create a Gmail compose URL. Format: "https://mail.google.com/mail/?view=cm&fs=1&to=<specific-contact-email>&su=<URL-encoded subject>&body=<URL-encoded email_body>". IMPORTANT: Extract the specific contact email address mentioned in the policy (e.g., privacy@company.com, support@company.com, dpo@company.com). If no specific email is found, use privacy@<domain> as a fallback. The body parameter must contain the SAME content as email_body field but URL-encoded. Use %20 for spaces, %0A for newlines.
 
 Email writing guidelines:
 - Be specific - cite actual practices you found in THIS policy
@@ -206,7 +206,7 @@ Sincerely,
                 text="Review privacy settings and limit data sharing where possible",
                 priority="high",
                 reference_url=f"{base_url}#data-sharing",
-                mailto_link=f"mailto:privacy@{domain}?subject={quote('Request to Limit Data Sharing')}&body={quote(email_body)}",
+                mailto_link=f"https://mail.google.com/mail/?view=cm&fs=1&to=privacy@{domain}&su={quote('Request to Limit Data Sharing')}&body={quote(email_body)}",
                 email_body=email_body
             ))
         if 'opt out' in text_lower or 'opt-out' in text_lower:
@@ -229,7 +229,7 @@ Thank you,
                 url=url + "#settings" if url else None,
                 priority="medium",
                 reference_url=f"{base_url}#opt-out",
-                mailto_link=f"mailto:privacy@{domain}?subject={quote('Opt-Out Request')}&body={quote(email_body)}",
+                mailto_link=f"https://mail.google.com/mail/?view=cm&fs=1&to=privacy@{domain}&su={quote('Opt-Out Request')}&body={quote(email_body)}",
                 email_body=email_body
             ))
         if score < 50:
@@ -250,7 +250,7 @@ Best regards,
                 text="Consider using privacy-focused alternatives to this service",
                 priority="high",
                 reference_url=f"{base_url}#data-collection",
-                mailto_link=f"mailto:privacy@{domain}?subject={quote('Privacy Concerns Regarding Data Collection')}&body={quote(email_body1)}",
+                mailto_link=f"https://mail.google.com/mail/?view=cm&fs=1&to=privacy@{domain}&su={quote('Privacy Concerns Regarding Data Collection')}&body={quote(email_body1)}",
                 email_body=email_body1
             ))
             email_body2 = """Dear Privacy Team,
@@ -270,7 +270,7 @@ Regards,
                 text="Use a VPN and privacy browser extensions when using this service",
                 priority="medium",
                 reference_url=f"{base_url}#tracking",
-                mailto_link=f"mailto:privacy@{domain}?subject={quote('Question About Tracking Practices')}&body={quote(email_body2)}",
+                mailto_link=f"https://mail.google.com/mail/?view=cm&fs=1&to=privacy@{domain}&su={quote('Question About Tracking Practices')}&body={quote(email_body2)}",
                 email_body=email_body2
             ))
         if 'delete' in text_lower:
@@ -292,7 +292,7 @@ Thank you,
                 text="Exercise your right to delete your data if you no longer use the service",
                 priority="low",
                 reference_url=f"{base_url}#user-rights",
-                mailto_link=f"mailto:privacy@{domain}?subject={quote('Data Deletion Request')}&body={quote(email_body3)}",
+                mailto_link=f"https://mail.google.com/mail/?view=cm&fs=1&to=privacy@{domain}&su={quote('Data Deletion Request')}&body={quote(email_body3)}",
                 email_body=email_body3
             ))
 
