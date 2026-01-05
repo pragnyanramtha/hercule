@@ -10,7 +10,7 @@
     "test": "vitest",
     "test:run": "vitest run",
     "test:coverage": "vitest run --coverage",
-    "test:backend": "cd ../backend && python -m pytest test_backend.py -v",
+    "test:backend": "cd ../backend && uv run pytest tests/ -v",
     "test:all": "npm run test:run && npm run test:backend",
     "lint": "eslint src --ext .ts,.tsx",
     "type-check": "tsc --noEmit",
