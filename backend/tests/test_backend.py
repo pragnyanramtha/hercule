@@ -61,7 +61,7 @@ def shared_types_schema():
     import re
     import os
 
-    types_file = os.path.join(os.path.dirname(__file__), '..', 'shared', 'types.ts')
+    types_file = os.path.join(os.path.dirname(__file__), '..', '..', 'shared', 'types.ts')
 
     with open(types_file, 'r') as f:
         content = f.read()
