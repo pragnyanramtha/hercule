@@ -1,19 +1,22 @@
 /**
  * Extension configuration
- * API URL can be overridden via environment variable during build
+ * API URL is configured via environment variable during build:
+ * - Development: defaults to localhost:8000
+ * - Production: set VITE_API_URL in .env.production
  */
 
 export const config = {
   /**
-   * Backend API URL - defaults to localhost for development
+   * Backend API URL
    * Set VITE_API_URL environment variable for production builds
+   * Example: VITE_API_URL=https://your-function-app.azurewebsites.net
    */
   apiUrl: import.meta.env.VITE_API_URL || 'http://localhost:8000',
 
   /**
    * Request timeout in milliseconds
    */
-  requestTimeout: 30000,
+  requestTimeout: 60000,
 
   /**
    * Maximum retries for failed requests
@@ -22,3 +25,4 @@ export const config = {
 } as const;
 
 export type Config = typeof config;
+
