@@ -103,6 +103,38 @@ class CosmosDBCacheManager:
         
         return 'url:' + hashlib.sha256(normalized.encode('utf-8')).hexdigest()
     
+    @staticmethod
+    def generate_domain_key(url: str) -> str:
+        """
+        Generate SHA-256 hash of just the base domain.
+        Used for domain-level cache hits.
+
+        Args:
+            url: The URL to extract domain from
+
+        Returns:
+            SHA-256 hash as hexadecimal string prefixed with 'domain:'
+        """
+        from urllib.parse import urlparse
+        
+        if not url.startswith('http'):
+            url = f'https://{url}'
+        
+        parsed = urlparse(url)
+        domain = parsed.netloc.lower().replace('www.', '')
+        
+        # Extract base domain
+        parts = domain.split('.')
+        if len(parts) > 2:
+            if parts[-2] in ('co', 'com', 'org', 'net', 'gov', 'edu'):
+                base_domain = '.'.join(parts[-3:])
+            else:
+                base_domain = '.'.join(parts[-2:])
+        else:
+            base_domain = domain
+        
+        return 'domain:' + hashlib.sha256(base_domain.encode('utf-8')).hexdigest()
+    
     def get(self, cache_key: str) -> Optional['AnalysisResult']:
         """
         Retrieve cached analysis result from Cosmos DB.
