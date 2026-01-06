@@ -12,6 +12,7 @@ dist/
 build/
 
 # Environment variables
+backend/keys.json
 .env
 
 # Python cache
@@ -37,3 +38,4 @@ cache.json
 
 # Logs
 *.log
+image.png
