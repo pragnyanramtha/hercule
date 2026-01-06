@@ -11,9 +11,13 @@ env/
 dist/
 build/
 
-# Environment variables
+# Environment variables and secrets
 backend/keys.json
+backend/local.settings.json
+backend/.env
+backend/local.settings.json
 .env
+*.env.local
 
 # Python cache
 __pycache__/
@@ -35,7 +39,16 @@ Thumbs.db
 
 # Cache files
 cache.json
+backend/cache.json
 
 # Logs
 *.log
+
+# Azure Functions
+.python_packages/
+.funcignore
+bin/
+obj/
+
+# Misc
 image.png

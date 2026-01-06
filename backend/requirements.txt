@@ -15,7 +15,6 @@ pytest
 pytest-cov
 pytest-asyncio
 
-# Azure deployment (optional - install if deploying to Azure)
+# Azure deployment (optional)
 # azure-functions>=1.17.0
 # azure-cosmos>=4.5.0
-

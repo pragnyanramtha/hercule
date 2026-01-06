@@ -1,0 +1,18 @@
+{
+  "IsEncrypted": false,
+  "Values": {
+    "FUNCTIONS_WORKER_RUNTIME": "python",
+    "AzureWebJobsStorage": "",
+    "AzureWebJobsFeatureFlags": "EnableWorkerIndexing",
+    "GROQ_API_KEY": "YOUR_GROQ_API_KEY_HERE",
+    "STORAGE_MODE": "cosmos",
+    "COSMOS_CONNECTION_STRING": "YOUR_COSMOS_CONNECTION_STRING_HERE",
+    "COSMOS_DATABASE_NAME": "privacy-analyzer",
+    "COSMOS_CONTAINER_NAME": "analysis-cache",
+    "ALLOWED_ORIGINS": "*"
+  },
+  "Host": {
+    "CORS": "*",
+    "CORSCredentials": false
+  }
+}
