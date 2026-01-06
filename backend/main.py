@@ -148,14 +148,23 @@ async def analyze_policy(request: AnalyzeRequest):
     if user_api_key:
         logger.info(f"🔑 User API key provided (ending ...{user_api_key[-6:]})")
     
-    # CACHE-FIRST: Check cache by URL BEFORE any discovery
+    # CACHE-FIRST: Check cache by URL and domain BEFORE any discovery
     if policy_url:
+        # Try exact URL match first
         url_hash = cache_manager.generate_url_key(policy_url)
         cached_result = cache_manager.get(url_hash)
         if cached_result is not None:
             logger.info(f"💾 Cache HIT by URL - returning cached result (score: {cached_result.score})")
             return cached_result
-        logger.debug(f"Cache MISS by URL for {policy_url}")
+        
+        # Try domain-level cache (catches any page on the same domain)
+        domain_hash = cache_manager.generate_domain_key(policy_url)
+        cached_result = cache_manager.get(domain_hash)
+        if cached_result is not None:
+            logger.info(f"💾 Cache HIT by domain - returning cached result (score: {cached_result.score})")
+            return cached_result
+        
+        logger.info(f"🔍 Cache MISS - starting discovery for: {policy_url}")
     
     # If no policy text provided, use aggressive discovery
     if not policy_text and policy_url:
@@ -208,10 +217,12 @@ async def analyze_policy(request: AnalyzeRequest):
             # Restore original models
             llm_service.models = original_models
             
-            # Cache the result by URL
+            # Cache the result by URL and domain
             if policy_url:
                 url_hash = cache_manager.generate_url_key(policy_url)
                 cache_manager.set(url_hash, result)
+                domain_hash = cache_manager.generate_domain_key(policy_url)
+                cache_manager.set(domain_hash, result)
             
             return result
         except Exception as e:
@@ -271,12 +282,15 @@ async def analyze_policy(request: AnalyzeRequest):
         logger.error(f"❌ Analysis error: {type(e).__name__}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to analyze policy: {type(e).__name__}")
     
-    # Cache result by BOTH text hash and URL
+    # Cache result by text hash, URL, and domain
     cache_manager.set(text_hash, result)
     if policy_url:
         url_hash = cache_manager.generate_url_key(policy_url)
         cache_manager.set(url_hash, result)
-    logger.debug(f"💾 Result cached (cache size: {cache_manager.size()})")
+        # Also cache by domain for faster lookups from any page on the domain
+        domain_hash = cache_manager.generate_domain_key(policy_url)
+        cache_manager.set(domain_hash, result)
+    logger.info(f"💾 Result cached by text, URL, and domain (cache size: {cache_manager.size()})")
     
     return result
 

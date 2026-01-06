@@ -110,6 +110,7 @@ class CacheManager:
         domain = parsed.netloc.lower().replace('www.', '')
         
         # Include path if it's not just root (for specific policy pages)
+        # Strip query params and fragments
         path = parsed.path.strip('/')
         if path:
             normalized = f"{domain}/{path}"
@@ -118,6 +119,40 @@ class CacheManager:
         
         # Prefix with 'url:' to distinguish from text-based keys
         return 'url:' + hashlib.sha256(normalized.encode('utf-8')).hexdigest()
+    
+    @staticmethod
+    def generate_domain_key(url: str) -> str:
+        """
+        Generate SHA-256 hash of just the base domain.
+        Used for domain-level cache hits (any page on the domain).
+
+        Args:
+            url: The URL to extract domain from
+
+        Returns:
+            SHA-256 hash as hexadecimal string prefixed with 'domain:'
+        """
+        from urllib.parse import urlparse
+        
+        # Parse URL and extract domain
+        if not url.startswith('http'):
+            url = f'https://{url}'
+        
+        parsed = urlparse(url)
+        domain = parsed.netloc.lower().replace('www.', '')
+        
+        # Extract base domain (e.g., sub.example.com -> example.com)
+        parts = domain.split('.')
+        if len(parts) > 2:
+            # Handle common TLDs like .co.uk, .com.au
+            if parts[-2] in ('co', 'com', 'org', 'net', 'gov', 'edu'):
+                base_domain = '.'.join(parts[-3:])
+            else:
+                base_domain = '.'.join(parts[-2:])
+        else:
+            base_domain = domain
+        
+        return 'domain:' + hashlib.sha256(base_domain.encode('utf-8')).hexdigest()
 
     def get(self, text_hash: str) -> Optional[AnalysisResult]:
         """
