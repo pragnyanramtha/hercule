@@ -1,13 +1,18 @@
 """
 Cache module for Hercule.
 Handles in-memory caching with JSON file persistence.
+Supports local (JSON file) and cloud (Cosmos DB) storage backends.
 """
 import json
 import hashlib
+import os
+import logging
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Union
 from datetime import datetime, timedelta, timezone
 from threading import Lock
+
+logger = logging.getLogger("hercule-api.cache")
 
 from models import AnalysisResult
 
@@ -82,6 +87,37 @@ class CacheManager:
         """
         normalized = policy_text.strip().lower()
         return hashlib.sha256(normalized.encode('utf-8')).hexdigest()
+    
+    @staticmethod
+    def generate_url_key(url: str) -> str:
+        """
+        Generate SHA-256 hash of normalized URL/domain.
+        Used for cache-first lookup before discovery.
+
+        Args:
+            url: The URL to generate key for
+
+        Returns:
+            SHA-256 hash as hexadecimal string prefixed with 'url:'
+        """
+        from urllib.parse import urlparse
+        
+        # Parse URL and extract domain
+        if not url.startswith('http'):
+            url = f'https://{url}'
+        
+        parsed = urlparse(url)
+        domain = parsed.netloc.lower().replace('www.', '')
+        
+        # Include path if it's not just root (for specific policy pages)
+        path = parsed.path.strip('/')
+        if path:
+            normalized = f"{domain}/{path}"
+        else:
+            normalized = domain
+        
+        # Prefix with 'url:' to distinguish from text-based keys
+        return 'url:' + hashlib.sha256(normalized.encode('utf-8')).hexdigest()
 
     def get(self, text_hash: str) -> Optional[AnalysisResult]:
         """
@@ -142,5 +178,29 @@ class CacheManager:
         return len(self._memory_cache)
 
 
-# Global cache instance
-cache_manager = CacheManager()
+def get_cache_manager() -> Union[CacheManager, 'CosmosDBCacheManager']:
+    """
+    Factory function to get appropriate cache manager based on environment.
+    
+    Returns:
+        CacheManager for local storage, CosmosDBCacheManager for cloud storage.
+    """
+    storage_mode = os.getenv("STORAGE_MODE", "local").lower()
+    
+    if storage_mode == "cosmos":
+        try:
+            from cache_cosmos import CosmosDBCacheManager
+            logger.info("🌐 Using Cosmos DB cache backend")
+            return CosmosDBCacheManager()
+        except ImportError as e:
+            logger.warning(f"Failed to import Cosmos DB cache: {e}. Falling back to local.")
+        except Exception as e:
+            logger.warning(f"Failed to initialize Cosmos DB cache: {e}. Falling back to local.")
+    
+    logger.info("📁 Using local JSON file cache backend")
+    return CacheManager()
+
+
+# Global cache instance - uses factory to select backend
+cache_manager = get_cache_manager()
+

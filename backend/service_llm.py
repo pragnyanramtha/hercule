@@ -5,11 +5,12 @@ import os
 import json
 import logging
 import time
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 from urllib.parse import quote
 from groq import Groq
 from models import AnalysisResult, ActionItem
 from datetime import datetime, timezone
+from api_key_manager import api_key_manager
 
 logger = logging.getLogger("hercule-api.llm")
 
@@ -18,8 +19,8 @@ class LLMService:
     """Service for analyzing privacy policies using Groq API."""
 
     def __init__(self):
-        """Initialize LLM client with Groq API and rotation fallback."""
-        self.groq_api_key = os.getenv("GROQ_API_KEY")
+        """Initialize LLM client with Groq API and key manager."""
+        self.key_manager = api_key_manager
         
         # Model rotation order (try in sequence for resilience)
         self.models = [
@@ -31,29 +32,61 @@ class LLMService:
             "groq/compound"  # Last resort - has native web search
         ]
         
-        if self.groq_api_key:
+        # Check if we have any keys available
+        if self.key_manager.has_keys():
             self.test_mode = False
             self.provider = "groq"
-            self.client = Groq(api_key=self.groq_api_key)
             self.current_model_index = 0
             self.deployment = self.models[0]  # Start with first model
             self.dev_mode = True  # Groq is always dev mode
-            logger.info("🚀 Using Groq API with model rotation")
+            logger.info("🚀 Using Groq API with model rotation and key pool")
             logger.info(f"   Primary model: {self.deployment}")
             logger.info(f"   Fallback models: {len(self.models) - 1}")
+            logger.info(f"   Key pool stats: {self.key_manager.get_stats()['total_keys']} keys")
         else:
             # Test mode: No API key provided
             self.test_mode = True
             self.provider = "mock"
-            self.client = None
             self.deployment = "mock_model"
             self.dev_mode = True
             self.models = ["mock_model"]
             self.current_model_index = 0
-            logger.warning("⚠️  Running in TEST MODE - using mock LLM responses (set GROQ_API_KEY to enable)")
+            logger.warning("⚠️  Running in TEST MODE - using mock LLM responses (add keys to keys.json or set GROQ_API_KEY)")
+    
+    def _get_client(self, user_api_key: Optional[str] = None) -> Groq:
+        """
+        Get Groq client with appropriate API key.
+        
+        Priority:
+        1. User-provided key (if given, also add to pool)
+        2. Key from key manager pool/rotation
+        """
+        if user_api_key:
+            # Add user key to pool for future use
+            self.key_manager.add_key(user_api_key)
+            logger.info(f"🔑 Using user-provided Groq API key (ending ...{user_api_key[-6:]})")
+            return Groq(api_key=user_api_key)
+        
+        # Get key from manager (pool or .env fallback)
+        current_key = self.key_manager.get_current_key()
+        if not current_key:
+            raise ValueError("No API keys available")
+        
+        logger.debug(f"Using key from pool (ending ...{current_key[-6:]})")
+        return Groq(api_key=current_key)
 
-    def _build_system_prompt(self) -> str:
-        """Constructs the Privacy Lawyer Agent system prompt."""
+    def _build_system_prompt(self, user_name: str = "") -> str:
+        """
+        Constructs the Privacy Lawyer Agent system prompt.
+        
+        Args:
+            user_name: Optional user name to personalize email templates
+        """
+        # Add user name clause if provided
+        name_clause = ""
+        if user_name and user_name.strip():
+            name_clause = f"\n\nIMPORTANT: The user's name is '{user_name.strip()}'. When generating email templates in 'email_body', use their actual name '{user_name.strip()}' instead of '[Your Name]' in the signature/closing."
+        
         return """You are a Privacy Lawyer Agent, an expert in analyzing privacy policies and terms of service.
 
 Your task is to analyze privacy policies and provide clear, actionable insights for everyday users.
@@ -100,7 +133,7 @@ Scoring guidelines:
 - 50-79: Moderate concerns, some unclear terms or data sharing
 - 0-49: Significant concerns, vague language, extensive data collection/sharing
 
-Return ONLY the JSON object, no additional text."""
+Return ONLY the JSON object, no additional text.""" + name_clause
 
     def _generate_mock_analysis(self, policy_text: str, url: str) -> AnalysisResult:
         """
@@ -305,22 +338,30 @@ Thank you,
             url=url
         )
 
-    def analyze_policy(self, policy_text: str, url: str) -> AnalysisResult:
+    def analyze_policy(
+        self, 
+        policy_text: str, 
+        url: str, 
+        user_name: str = "",
+        user_groq_api_key: str = ""
+    ) -> AnalysisResult:
         """
-        Sends policy text to Groq LLM with automatic model rotation fallback.
+        Sends policy text to Groq LLM with automatic model and key rotation.
 
         Args:
             policy_text: The privacy policy text to analyze (max 50,000 chars)
             url: The URL of the privacy policy
+            user_name: Optional user name for personalized emails
+            user_groq_api_key: Optional user-provided API key
 
         Returns:
             AnalysisResult object with score, summary, red flags, and action items
 
         Raises:
-            Exception: If all models fail
+            Exception: If all models and keys fail
         """
-        # If in test mode, return mock analysis
-        if self.test_mode:
+        # If in test mode and no user key provided, return mock analysis
+        if self.test_mode and not user_groq_api_key:
             logger.debug("Using mock analysis (test mode)")
             return self._generate_mock_analysis(policy_text, url)
 
@@ -331,87 +372,121 @@ Thank you,
             truncated_text += "\n[Text truncated at 50,000 characters]"
             logger.info(f"📄 Policy text truncated: {original_length:,} → 50,000 chars")
 
+        # Build system prompt with user name if provided
+        system_prompt = self._build_system_prompt(user_name)
+
+        # Track key rotation attempts
+        max_key_rotations = 10  # Avoid infinite loops
+        key_rotation_count = 0
+        
         # Try each model in sequence until one succeeds
         last_error = None
         for attempt, model in enumerate(self.models):
-            try:
-                logger.debug(f"Attempt {attempt + 1}/{len(self.models)} - Trying model: {model}")
-                start_time = time.time()
+            while key_rotation_count < max_key_rotations:
+                try:
+                    # Get client with appropriate key
+                    client = self._get_client(user_groq_api_key if attempt == 0 and key_rotation_count == 0 else None)
+                    
+                    logger.debug(f"Attempt {attempt + 1}/{len(self.models)} - Trying model: {model}")
+                    start_time = time.time()
+                    
+                    # Increment request count
+                    self.key_manager.increment_request_count()
 
-                # Special handling for groq/compound - it has web search
-                if model == "groq/compound":
-                    # Just send the URL and let it search and analyze
-                    response = self.client.chat.completions.create(
-                        model=model,
-                        messages=[
-                            {"role": "system", "content": self._build_system_prompt()},
-                            {"role": "user", "content": f"""Please use your web search capability to access and analyze the privacy policy at this URL: {url}
+                    # Special handling for groq/compound - it has web search
+                    if model == "groq/compound":
+                        # Just send the URL and let it search and analyze
+                        response = client.chat.completions.create(
+                            model=model,
+                            messages=[
+                                {"role": "system", "content": system_prompt},
+                                {"role": "user", "content": f"""Please use your web search capability to access and analyze the privacy policy at this URL: {url}
 
 Search for and read the privacy policy, then provide your analysis in the required JSON format.
 
 URL to analyze: {url}"""}
-                        ],
-                        temperature=0.3,
-                        max_tokens=2000,
-                        response_format={"type": "json_object"}
+                            ],
+                            temperature=0.3,
+                            max_tokens=2000,
+                            response_format={"type": "json_object"}
+                        )
+                    else:
+                        # Normal models - send the policy text
+                        response = client.chat.completions.create(
+                            model=model,
+                            messages=[
+                                {"role": "system", "content": system_prompt},
+                                {"role": "user", "content": f"Analyze this privacy policy:\n\n{truncated_text}"}
+                            ],
+                            temperature=0.3,
+                            max_tokens=2000,
+                            response_format={"type": "json_object"}
+                        )
+
+                    # Parse the response
+                    api_duration = (time.time() - start_time) * 1000
+                    logger.info(f"✅ Model {model} succeeded in {api_duration:.0f}ms")
+
+                    content = response.choices[0].message.content
+                    result_dict = json.loads(content)
+
+                    # Validate response structure
+                    if not self._validate_response(result_dict):
+                        logger.warning(f"Invalid response from {model}, trying next model...")
+                        break  # Exit key rotation loop, try next model
+
+                    # Log analysis results
+                    score = result_dict["score"]
+                    num_red_flags = len(result_dict.get("red_flags", []))
+                    num_actions = len(result_dict.get("user_action_items", []))
+                    logger.info(f"📊 Analysis - Score: {score}/100, Red flags: {num_red_flags}, Actions: {num_actions}")
+
+                    # Convert to AnalysisResult model
+                    action_items = [
+                        ActionItem(**item) for item in result_dict.get("user_action_items", [])
+                    ]
+
+                    # Update current model for next request
+                    self.deployment = model
+                    self.current_model_index = attempt
+
+                    return AnalysisResult(
+                        score=result_dict["score"],
+                        summary=result_dict["summary"],
+                        red_flags=result_dict.get("red_flags", []),
+                        user_action_items=action_items,
+                        timestamp=datetime.now(timezone.utc),
+                        url=url
                     )
-                else:
-                    # Normal models - send the policy text
-                    response = self.client.chat.completions.create(
-                        model=model,
-                        messages=[
-                            {"role": "system", "content": self._build_system_prompt()},
-                            {"role": "user", "content": f"Analyze this privacy policy:\n\n{truncated_text}"}
-                        ],
-                        temperature=0.3,
-                        max_tokens=2000,
-                        response_format={"type": "json_object"}
-                    )
 
-                # Parse the response
-                api_duration = (time.time() - start_time) * 1000
-                logger.info(f"✅ Model {model} succeeded in {api_duration:.0f}ms")
-
-                content = response.choices[0].message.content
-                result_dict = json.loads(content)
-
-                # Validate response structure
-                if not self._validate_response(result_dict):
-                    logger.warning(f"Invalid response from {model}, trying next model...")
-                    continue
-
-                # Log analysis results
-                score = result_dict["score"]
-                num_red_flags = len(result_dict.get("red_flags", []))
-                num_actions = len(result_dict.get("user_action_items", []))
-                logger.info(f"📊 Analysis - Score: {score}/100, Red flags: {num_red_flags}, Actions: {num_actions}")
-
-                # Convert to AnalysisResult model
-                action_items = [
-                    ActionItem(**item) for item in result_dict.get("user_action_items", [])
-                ]
-
-                # Update current model for next request
-                self.deployment = model
-                self.current_model_index = attempt
-
-                return AnalysisResult(
-                    score=result_dict["score"],
-                    summary=result_dict["summary"],
-                    red_flags=result_dict.get("red_flags", []),
-                    user_action_items=action_items,
-                    timestamp=datetime.now(timezone.utc),
-                    url=url
-                )
-
-            except json.JSONDecodeError as e:
-                logger.warning(f"❌ Model {model} returned invalid JSON: {e}")
-                last_error = e
-                continue
-            except Exception as e:
-                logger.warning(f"❌ Model {model} failed: {type(e).__name__}: {e}")
-                last_error = e
-                continue
+                except json.JSONDecodeError as e:
+                    logger.warning(f"❌ Model {model} returned invalid JSON: {e}")
+                    last_error = e
+                    break  # Try next model
+                    
+                except Exception as e:
+                    error_str = str(e).lower()
+                    
+                    # Check for rate limit error (429)
+                    if "rate_limit" in error_str or "429" in error_str or "too many requests" in error_str:
+                        logger.warning(f"⚠️ Rate limit hit on current key, rotating...")
+                        next_key = self.key_manager.mark_rate_limited()
+                        
+                        if next_key:
+                            key_rotation_count += 1
+                            logger.info(f"🔄 Rotated to next key (rotation #{key_rotation_count})")
+                            continue  # Retry with new key
+                        else:
+                            logger.error("All keys exhausted, trying next model...")
+                            last_error = e
+                            break  # Try next model
+                    else:
+                        logger.warning(f"❌ Model {model} failed: {type(e).__name__}: {e}")
+                        last_error = e
+                        break  # Try next model
+            
+            # Reset key rotation count for next model
+            key_rotation_count = 0
 
         # All models failed
         logger.error(f"💥 All {len(self.models)} models failed!")

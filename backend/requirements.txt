@@ -1,13 +1,21 @@
+# Core dependencies
 fastapi
 uvicorn
 groq
 python-dotenv
 pydantic
-pytest
-pytest-cov
-pytest-asyncio
 httpx
 starlette
 beautifulsoup4>=4.12.0
 requests>=2.31.0
 ddgs>=7.0.0
+
+# Testing
+pytest
+pytest-cov
+pytest-asyncio
+
+# Azure deployment (optional - install if deploying to Azure)
+# azure-functions>=1.17.0
+# azure-cosmos>=4.5.0
+

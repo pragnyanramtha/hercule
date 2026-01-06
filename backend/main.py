@@ -69,6 +69,8 @@ class AnalyzeRequest(BaseModel):
     """Request model for /analyze endpoint."""
     policy_text: str = ""
     url: str = ""
+    user_name: str = ""  # User's name for personalized emails
+    user_groq_api_key: str = ""  # User-provided API key
 
     @field_validator('policy_text')
     @classmethod
@@ -80,6 +82,20 @@ class AnalyzeRequest(BaseModel):
     @field_validator('url')
     @classmethod
     def validate_url(cls, v: str) -> str:
+        if v:
+            return v.replace('\x00', '').strip()
+        return ""
+    
+    @field_validator('user_name')
+    @classmethod
+    def validate_user_name(cls, v: str) -> str:
+        if v:
+            return v.replace('\x00', '').strip()[:100]  # Limit name length
+        return ""
+    
+    @field_validator('user_groq_api_key')
+    @classmethod
+    def validate_api_key(cls, v: str) -> str:
         if v:
             return v.replace('\x00', '').strip()
         return ""
@@ -123,7 +139,23 @@ async def analyze_policy(request: AnalyzeRequest):
     """
     policy_text = request.policy_text
     policy_url = request.url
+    user_name = request.user_name
+    user_api_key = request.user_groq_api_key
     
+    # Log user settings if provided
+    if user_name:
+        logger.info(f"👤 User name provided: {user_name}")
+    if user_api_key:
+        logger.info(f"🔑 User API key provided (ending ...{user_api_key[-6:]})")
+    
+    # CACHE-FIRST: Check cache by URL BEFORE any discovery
+    if policy_url:
+        url_hash = cache_manager.generate_url_key(policy_url)
+        cached_result = cache_manager.get(url_hash)
+        if cached_result is not None:
+            logger.info(f"💾 Cache HIT by URL - returning cached result (score: {cached_result.score})")
+            return cached_result
+        logger.debug(f"Cache MISS by URL for {policy_url}")
     
     # If no policy text provided, use aggressive discovery
     if not policy_text and policy_url:
@@ -166,13 +198,21 @@ async def analyze_policy(request: AnalyzeRequest):
         
         try:
             # Call LLM with URL only - groq/compound will search and analyze
-            result = llm_service.analyze_policy("", policy_url)  # Empty text, compound will search
+            result = llm_service.analyze_policy(
+                "", policy_url,
+                user_name=user_name,
+                user_groq_api_key=user_api_key
+            )
             logger.info(f"✨ Analysis via groq/compound complete - Score: {result.score}/100")
             
             # Restore original models
             llm_service.models = original_models
             
-            # Skip caching and return directly
+            # Cache the result by URL
+            if policy_url:
+                url_hash = cache_manager.generate_url_key(policy_url)
+                cache_manager.set(url_hash, result)
+            
             return result
         except Exception as e:
             llm_service.models = original_models
@@ -199,22 +239,26 @@ async def analyze_policy(request: AnalyzeRequest):
             detail="Either policy_text or url must be provided"
         )
     
-    # Generate cache key
+    # Generate cache key from text
     text_hash = cache_manager.generate_key(policy_text)
     logger.info(f"📝 Analyzing policy from: {policy_url or 'direct text'} (hash: {text_hash[:12]}...)")
     
-    # Check cache (ALWAYS check cache as requested)
+    # Check cache by text hash (in case URL check missed but text is same)
     cached_result = cache_manager.get(text_hash)
     if cached_result is not None:
-        logger.info(f"💾 Cache HIT - returning cached result (score: {cached_result.score})")
+        logger.info(f"💾 Cache HIT by text - returning cached result (score: {cached_result.score})")
         return cached_result
     
     logger.info(f"🔍 Cache MISS - calling {llm_service.provider.upper()} LLM...")
     
-    # Call LLM
+    # Call LLM with user settings
     start_time = time.time()
     try:
-        result = llm_service.analyze_policy(policy_text, policy_url)
+        result = llm_service.analyze_policy(
+            policy_text, policy_url,
+            user_name=user_name,
+            user_groq_api_key=user_api_key
+        )
         duration_ms = (time.time() - start_time) * 1000
         logger.info(f"✨ Analysis complete - Score: {result.score}/100, Red flags: {len(result.red_flags)}, Duration: {duration_ms:.0f}ms")
     except ValueError as e:
@@ -227,8 +271,11 @@ async def analyze_policy(request: AnalyzeRequest):
         logger.error(f"❌ Analysis error: {type(e).__name__}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to analyze policy: {type(e).__name__}")
     
-    # Cache result (ALWAYS cache)
+    # Cache result by BOTH text hash and URL
     cache_manager.set(text_hash, result)
+    if policy_url:
+        url_hash = cache_manager.generate_url_key(policy_url)
+        cache_manager.set(url_hash, result)
     logger.debug(f"💾 Result cached (cache size: {cache_manager.size()})")
     
     return result
