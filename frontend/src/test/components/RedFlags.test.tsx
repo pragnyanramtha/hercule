@@ -9,12 +9,12 @@ describe('RedFlags', () => {
   describe('No Red Flags', () => {
     it('should show positive message when no red flags', () => {
       render(<RedFlags redFlags={[]} />);
-      expect(screen.getByText('✓ No major concerns identified')).toBeInTheDocument();
+      expect(screen.getByText('No major concerns identified')).toBeInTheDocument();
     });
 
-    it('should have green styling when no red flags', () => {
-      const { container } = render(<RedFlags redFlags={[]} />);
-      expect(container.querySelector('.bg-green-50')).toBeInTheDocument();
+    it('should show Safe and Sound header when no red flags', () => {
+      render(<RedFlags redFlags={[]} />);
+      expect(screen.getByText('Safe and Sound')).toBeInTheDocument();
     });
   });
 
@@ -34,9 +34,9 @@ describe('RedFlags', () => {
       expect(warnings).toHaveLength(3);
     });
 
-    it('should have red styling when flags exist', () => {
-      const { container } = render(<RedFlags redFlags={sampleFlags} />);
-      expect(container.querySelector('.bg-red-50')).toBeInTheDocument();
+    it('should show Red Flags header when flags exist', () => {
+      render(<RedFlags redFlags={sampleFlags} />);
+      expect(screen.getByText('Red Flags')).toBeInTheDocument();
     });
   });
 

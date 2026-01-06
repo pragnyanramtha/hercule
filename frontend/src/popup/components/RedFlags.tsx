@@ -17,19 +17,22 @@ function RedFlags({ redFlags }: RedFlagsProps) {
 
   if (redFlags.length === 0) {
     return (
-      <div className="bg-emerald-950/20 bg-green-50 border border-emerald-500/10 rounded-3xl p-6 backdrop-blur-sm">
-        <h2 className="text-sm font-semibold mb-2 text-emerald-400 flex items-center gap-2 uppercase tracking-wide">
+      <div className="bg-emerald-950/30 border border-emerald-500/20 rounded-3xl p-6 backdrop-blur-sm">
+        <h2 className="text-sm font-semibold mb-3 text-emerald-400 flex items-center gap-2 uppercase tracking-wide">
           <Icons.Shield className="w-4 h-4" /> Safe and Sound
         </h2>
-        <p className="text-emerald-200/70 text-sm font-normal leading-relaxed">
-          ✓ No major concerns identified
+        <p className="text-emerald-300/80 text-sm font-normal leading-relaxed flex items-center gap-2">
+          <svg className="w-4 h-4 text-emerald-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+          </svg>
+          No major concerns identified
         </p>
       </div>
     );
   }
 
   return (
-    <div className="bg-rose-950/20 bg-red-50 border border-rose-500/10 rounded-3xl p-6 backdrop-blur-sm">
+    <div className="bg-rose-950/30 border border-rose-500/20 rounded-3xl p-6 backdrop-blur-sm">
       <h2 className="text-sm font-semibold mb-4 text-rose-400 flex items-center gap-2 uppercase tracking-wide">
         <Icons.Alert className="w-4 h-4" /> Red Flags
       </h2>
