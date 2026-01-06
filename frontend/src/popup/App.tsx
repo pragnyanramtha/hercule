@@ -7,6 +7,7 @@ import Summary from './components/Summary';
 import RedFlags from './components/RedFlags';
 import ActionItems from './components/ActionItems';
 import { Icons } from './components/Icons';
+import Settings, { useUserSettings } from './components/Settings';
 
 type LoadingPhase = 'idle' | 'discovering' | 'analyzing' | 'done' | 'error';
 
@@ -19,6 +20,10 @@ function AppContent() {
   const [loading, setLoading] = useState<LoadingState>({ phase: 'discovering', message: 'Finding privacy policy...' });
   const [result, setResult] = useState<AnalysisResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [showSettings, setShowSettings] = useState(false);
+
+  // Get user settings from storage
+  const userSettings = useUserSettings();
 
   useEffect(() => {
     analyzeCurrentSite();
@@ -57,7 +62,12 @@ function AppContent() {
         const response = await fetch(`${config.apiUrl}/analyze`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ policy_text: '', url: tab.url }),
+          body: JSON.stringify({
+            policy_text: '',
+            url: tab.url,
+            user_name: userSettings.userName || '',
+            user_groq_api_key: userSettings.groqApiKey || '',
+          }),
           signal: controller.signal,
         });
 
@@ -119,12 +129,16 @@ function AppContent() {
           </h1>
         </div>
         <button
+          onClick={() => setShowSettings(true)}
           className="p-2 rounded-xl bg-slate-800/50 border border-slate-700/50 hover:bg-slate-700/50 hover:border-slate-600/50 transition-all text-slate-400 hover:text-indigo-400 group"
           title="Settings"
         >
           <Icons.Settings className="w-5 h-5 group-hover:rotate-90 transition-transform duration-500" />
         </button>
       </header>
+
+      {/* Settings Modal */}
+      <Settings isOpen={showSettings} onClose={() => setShowSettings(false)} />
 
       <main className="p-6">
         {/* Loading State */}
