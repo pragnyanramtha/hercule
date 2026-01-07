@@ -14,10 +14,11 @@ build/
 # Environment variables and secrets
 backend/keys.json
 backend/local.settings.json
-backend/.env
+# backend/.env
 backend/local.settings.json
 .env
 *.env.local
+frontend/.env.production
 
 # Python cache
 __pycache__/
