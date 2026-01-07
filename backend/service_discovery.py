@@ -64,9 +64,7 @@ class DiscoveryService:
             'Accept-Language': 'en-US,en;q=0.5',
         }
         
-        # Character limits for policy text
-        self.max_chars = 8000  # Truncate to 8k chars
-        self.max_chars_threshold = 10000  # Only truncate if over 10k
+        # Note: Policy text truncation is handled by LLMService based on per-model context limits
         
         # 40+ common privacy policy paths
         self.common_paths = [
@@ -142,12 +140,10 @@ class DiscoveryService:
 
     def _truncate_text(self, text: str) -> str:
         """
-        Truncate policy text if it exceeds threshold.
-        Only truncate if over 10k chars, cut to 8k.
+        Return policy text without truncation.
+        Truncation is handled by LLMService based on each model's context limits.
         """
-        if len(text) > self.max_chars_threshold:
-            logger.info(f"📄 Policy text truncated: {len(text):,} → {self.max_chars:,} chars")
-            return text[:self.max_chars] + "\n\n[Text truncated at 8,000 characters]"
+        # No longer truncate here - let service_llm.py handle per-model truncation
         return text
 
     async def discover_and_extract(self, url: str) -> DiscoveryResult:
@@ -752,11 +748,7 @@ class DiscoveryService:
         import re
         text = re.sub(r'\s+', ' ', text)
         
-        # Note: Final truncation happens in _truncate_text() after successful discovery
-        # This initial extraction can be larger
-        if len(text) > 50000:
-            text = text[:50000]
-        
+        # No truncation here - LLMService handles per-model truncation
         return text
 
     def _looks_like_privacy_policy(self, text: str) -> bool:

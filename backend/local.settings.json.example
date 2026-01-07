@@ -5,6 +5,7 @@
     "AzureWebJobsStorage": "",
     "AzureWebJobsFeatureFlags": "EnableWorkerIndexing",
     "GROQ_API_KEY": "YOUR_GROQ_API_KEY_HERE",
+    "OPENROUTER_API_KEY": "YOUR_OPENROUTER_API_KEY_HERE",
     "STORAGE_MODE": "cosmos",
     "COSMOS_CONNECTION_STRING": "YOUR_COSMOS_CONNECTION_STRING_HERE",
     "COSMOS_DATABASE_NAME": "privacy-analyzer",

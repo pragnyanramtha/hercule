@@ -2,7 +2,34 @@
 Hercule API
 FastAPI backend for analyzing privacy policies using Groq LLM.
 """
+# CRITICAL: Load environment variables FIRST, before any local imports
+# This is because service_llm.py and api_key_manager.py read env vars at import time
 import os
+import json
+from pathlib import Path
+from dotenv import load_dotenv
+
+backend_dir = Path(__file__).parent
+root_dir = backend_dir.parent
+
+# 1. Load from local.settings.json (Azure Functions format) - highest priority
+local_settings_path = backend_dir / "local.settings.json"
+if local_settings_path.exists():
+    try:
+        with open(local_settings_path, 'r') as f:
+            settings = json.load(f)
+            values = settings.get("Values", {})
+            for key, value in values.items():
+                if value and value not in ["YOUR_GROQ_API_KEY_HERE", "YOUR_OPENROUTER_API_KEY_HERE", "YOUR_COSMOS_CONNECTION_STRING_HERE"]:
+                    os.environ[key] = str(value)
+    except Exception as e:
+        print(f"Warning: Could not load local.settings.json: {e}")
+
+# 2. Load from .env files (lower priority, won't override)
+load_dotenv(root_dir / ".env")
+load_dotenv(backend_dir / ".env")
+
+# NOW safe to import local modules that read env vars at init time
 import logging
 import time
 import asyncio
@@ -12,15 +39,11 @@ from typing import Optional
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, field_validator
-from dotenv import load_dotenv
 
 from models import AnalysisResult
 from service_llm import LLMService
 from service_discovery import DiscoveryService
 from cache import cache_manager
-
-# Load environment variables
-load_dotenv()
 
 # Configure logging
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
@@ -197,25 +220,18 @@ async def analyze_policy(request: AnalyzeRequest):
             logger.warning(f"❌ Discovery error: {e}. Using groq/compound with web search...")
             policy_text = None
     
-    # If we still don't have policy text, use groq/compound with web search
+    # If we still don't have policy text, use LLM fallback (will try all models in chain)
     if not policy_text and policy_url:
-        logger.info(f"🌐 Using groq/compound to analyze URL via web search: {policy_url}")
-        
-        # Force groq/compound model for this request
-        original_models = llm_service.models
-        llm_service.models = ["groq/compound"]  # Only use compound for web search
+        logger.info(f"🌐 No policy text - using LLM fallback chain with URL: {policy_url}")
         
         try:
-            # Call LLM with URL only - groq/compound will search and analyze
+            # Call LLM with URL only - fallback chain will handle it
             result = llm_service.analyze_policy(
                 "", policy_url,
                 user_name=user_name,
                 user_groq_api_key=user_api_key
             )
-            logger.info(f"✨ Analysis via groq/compound complete - Score: {result.score}/100")
-            
-            # Restore original models
-            llm_service.models = original_models
+            logger.info(f"✨ Analysis via LLM fallback complete - Score: {result.score}/100")
             
             # Cache the result by URL and domain
             if policy_url:
@@ -226,7 +242,6 @@ async def analyze_policy(request: AnalyzeRequest):
             
             return result
         except Exception as e:
-            llm_service.models = original_models
             error_msg = str(e)
             
             # Check if it's a rate limit error
@@ -237,10 +252,10 @@ async def analyze_policy(request: AnalyzeRequest):
                     detail="Rate limit exceeded. Please try again in a few seconds."
                 )
             
-            logger.error(f"❌ groq/compound analysis failed: {e}")
+            logger.error(f"❌ LLM fallback analysis failed: {e}")
             raise HTTPException(
                 status_code=404,
-                detail=f"Could not find or analyze privacy policy. Discovery timed out and fallback failed: {error_msg[:100]}"
+                detail=f"Could not find or analyze privacy policy. All LLM models failed: {error_msg[:100]}"
             )
     
     # Validate we have policy text
@@ -314,6 +329,28 @@ async def discover_policy(url: str):
         "policy_text": result.policy_text,
         "method": result.method
     }
+
+
+@app.delete("/cache")
+async def clear_cache():
+    """
+    Clear all cached entries.
+    Use with caution - this deletes all cached analysis results!
+    """
+    try:
+        old_size = cache_manager.size()
+        cache_manager.clear()
+        new_size = cache_manager.size()
+        logger.info(f"🗑️ Cache cleared: {old_size} → {new_size} entries")
+        return {
+            "status": "success",
+            "message": f"Cache cleared. Removed {old_size} entries.",
+            "old_size": old_size,
+            "new_size": new_size
+        }
+    except Exception as e:
+        logger.error(f"❌ Cache clear failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to clear cache: {str(e)}")
 
 
 if __name__ == "__main__":

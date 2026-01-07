@@ -1,12 +1,14 @@
 """
-LLM Service for privacy policy analysis using Groq API.
+LLM Service for privacy policy analysis using OpenRouter and Groq APIs.
 """
 import os
+import re
 import json
 import logging
 import time
+import httpx
 from typing import Dict, Any, Optional
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 from groq import Groq
 from models import AnalysisResult, ActionItem
 from datetime import datetime, timezone
@@ -14,75 +16,103 @@ from api_key_manager import api_key_manager
 
 logger = logging.getLogger("hercule-api.llm")
 
+# Context limits per model (in characters)
+MODEL_CONTEXT_LIMITS = {
+    "nvidia/nemotron-3-nano-30b-a3b:free": 1000000,  # Send full policy, let OpenRouter handle it
+    "groq/compound": 70000,
+    "llama-3.3-70b-versatile": 12000,
+    "groq/compound-mini": 70000,
+    "moonshotai/kimi-k2-instruct-0905": 10000,  # No policy, just website
+}
+
+# Model order for fallback chain
+FALLBACK_MODELS = [
+    ("nvidia/nemotron-3-nano-30b-a3b:free", "openrouter"),
+    ("groq/compound", "groq"),
+    ("llama-3.3-70b-versatile", "groq"),
+    ("groq/compound-mini", "groq"),
+    ("moonshotai/kimi-k2-instruct-0905", "groq"),  # Last resort - no policy text
+]
+
 
 class LLMService:
-    """Service for analyzing privacy policies using Groq API."""
+    """Service for analyzing privacy policies using OpenRouter and Groq APIs."""
 
     def __init__(self):
-        """Initialize LLM client with Groq API and key manager."""
+        """Initialize LLM client with API keys."""
         self.key_manager = api_key_manager
-        
-        # Model rotation order (try in sequence for resilience)
-        self.models = [
-            "moonshotai/kimi-k2-instruct-0905",
-            "moonshotai/kimi-k2-instruct",
-            "meta-llama/llama-4-maverick-17b-128e-instruct",
-            "openai/gpt-oss-120b",
-            "llama-3.3-70b-versatile",
-            "groq/compound"  # Last resort - has native web search
-        ]
+        self.openrouter_api_key = os.getenv("OPENROUTER_API_KEY")
         
         # Check if we have any keys available
-        if self.key_manager.has_keys():
+        if self.key_manager.has_keys() or self.openrouter_api_key:
             self.test_mode = False
-            self.provider = "groq"
-            self.current_model_index = 0
-            self.deployment = self.models[0]  # Start with first model
-            self.dev_mode = True  # Groq is always dev mode
-            logger.info("🚀 Using Groq API with model rotation and key pool")
-            logger.info(f"   Primary model: {self.deployment}")
-            logger.info(f"   Fallback models: {len(self.models) - 1}")
-            logger.info(f"   Key pool stats: {self.key_manager.get_stats()['total_keys']} keys")
+            self.provider = "openrouter" if self.openrouter_api_key else "groq"
+            self.deployment = FALLBACK_MODELS[0][0]
+            self.dev_mode = True
+            logger.info("🚀 LLM Service initialized with fallback chain")
+            logger.info(f"   Primary: {FALLBACK_MODELS[0][0]} ({FALLBACK_MODELS[0][1]})")
+            logger.info(f"   Fallback models: {len(FALLBACK_MODELS) - 1}")
+            if self.openrouter_api_key:
+                logger.info(f"   OpenRouter key: ...{self.openrouter_api_key[-6:]}")
+            if self.key_manager.has_keys():
+                logger.info(f"   Groq keys: {self.key_manager.get_stats()['total_keys']}")
         else:
-            # Test mode: No API key provided
+            # Test mode: No API keys
             self.test_mode = True
             self.provider = "mock"
             self.deployment = "mock_model"
             self.dev_mode = True
-            self.models = ["mock_model"]
-            self.current_model_index = 0
-            logger.warning("⚠️  Running in TEST MODE - using mock LLM responses (add keys to keys.json or set GROQ_API_KEY)")
+            logger.warning("⚠️  Running in TEST MODE - using mock LLM responses")
     
-    def _get_client(self, user_api_key: Optional[str] = None) -> Groq:
-        """
-        Get Groq client with appropriate API key.
-        
-        Priority:
-        1. User-provided key (if given, also add to pool)
-        2. Key from key manager pool/rotation
-        """
+    def _get_groq_client(self, user_api_key: Optional[str] = None) -> Groq:
+        """Get Groq client with appropriate API key."""
         if user_api_key:
-            # Add user key to pool for future use
             self.key_manager.add_key(user_api_key)
             logger.info(f"🔑 Using user-provided Groq API key (ending ...{user_api_key[-6:]})")
             return Groq(api_key=user_api_key)
         
-        # Get key from manager (pool or .env fallback)
         current_key = self.key_manager.get_current_key()
         if not current_key:
-            raise ValueError("No API keys available")
+            raise ValueError("No Groq API keys available")
         
-        logger.debug(f"Using key from pool (ending ...{current_key[-6:]})")
+        logger.debug(f"Using Groq key from pool (ending ...{current_key[-6:]})")
         return Groq(api_key=current_key)
+    
+    def _call_openrouter(self, model: str, messages: list, max_context: int) -> dict:
+        """Call OpenRouter API."""
+        if not self.openrouter_api_key:
+            raise ValueError("OpenRouter API key not configured")
+        
+        headers = {
+            "Authorization": f"Bearer {self.openrouter_api_key}",
+            "Content-Type": "application/json",
+            "HTTP-Referer": "https://hercule-privacy.azurewebsites.net",
+            "X-Title": "Hercule Privacy Analyzer"
+        }
+        
+        payload = {
+            "model": model,
+            "messages": messages,
+            "temperature": 0.3,
+            "max_tokens": 2000,
+            "response_format": {"type": "json_object"}
+        }
+        
+        with httpx.Client(timeout=60.0) as client:
+            response = client.post(
+                "https://openrouter.ai/api/v1/chat/completions",
+                headers=headers,
+                json=payload
+            )
+            
+            if response.status_code == 429:
+                raise Exception("Rate limit exceeded on OpenRouter")
+            
+            response.raise_for_status()
+            return response.json()
 
     def _build_system_prompt(self, user_name: str = "") -> str:
-        """
-        Constructs the Privacy Lawyer Agent system prompt.
-        
-        Args:
-            user_name: Optional user name to personalize email templates
-        """
-        # Add user name clause if provided
+        """Constructs the Privacy Lawyer Agent system prompt."""
         name_clause = ""
         if user_name and user_name.strip():
             name_clause = f"\n\nIMPORTANT: The user's name is '{user_name.strip()}'. When generating email templates in 'email_body', use their actual name '{user_name.strip()}' instead of '[Your Name]' in the signature/closing."
@@ -101,7 +131,7 @@ Analyze the following aspects:
 Provide your analysis as a JSON object with this exact structure:
 {
   "score": <number 0-100>,
-  "summary": "<plain-language summary of key points>",
+  "summary": "<plain-language summary of key points - MUST be 4-5 sentences minimum>",
   "red_flags": ["<concerning practice 1>", "<concerning practice 2>", ...],
   "user_action_items": [
     {
@@ -109,17 +139,24 @@ Provide your analysis as a JSON object with this exact structure:
       "url": "<optional general link>",
       "priority": "<high|medium|low>",
       "reference_url": "<URL with #section-anchor pointing to relevant policy section>",
-      "mailto_link": "https://mail.google.com/mail/?view=cm&fs=1&to=<company-email>&su=<URL-encoded-subject>&body=<URL-encoded-email-body>",
+      "recipient_email": "<company-email@domain.com>",
+      "email_subject": "<subject line for the email>",
       "email_body": "<pre-generated formal email message>"
     },
     ...
   ]
 }
 
+MINIMUM OUTPUT REQUIREMENTS:
+- "summary": MUST be at least 4-5 sentences providing a comprehensive overview
+- "red_flags": MUST include at least 5 items (find concerning practices or potential issues)
+- "user_action_items": MUST include at least 3 items (no maximum limit - include all relevant actions)
+
 For each action item:
 - "reference_url": Create a URL pointing to the specific section of the privacy policy. Use anchors like #data-collection, #third-party-sharing, #user-rights, etc.
-- "email_body": Write a PERSONALIZED, polite formal email (2-3 paragraphs) tailored to the SPECIFIC privacy concern you found. Reference specific clauses or practices from THIS policy. Include: greeting, specific concern with details, request for action/clarification, and closing. Use [Your Name] as placeholder.
-- "mailto_link": Create a Gmail compose URL. Format: "https://mail.google.com/mail/?view=cm&fs=1&to=<specific-contact-email>&su=<URL-encoded subject>&body=<URL-encoded email_body>". IMPORTANT: Extract the specific contact email address mentioned in the policy (e.g., privacy@company.com, support@company.com, dpo@company.com). If no specific email is found, use privacy@<domain> as a fallback. The body parameter must contain the SAME content as email_body field but URL-encoded. Use %20 for spaces, %0A for newlines.
+- "recipient_email": Extract the specific contact email address mentioned in the policy (e.g., privacy@company.com, support@company.com, dpo@company.com). If no specific email is found, use privacy@<domain> as a fallback.
+- "email_subject": A clear, concise subject line for the email.
+- "email_body": Write a PERSONALIZED, polite formal email (2-3 paragraphs) tailored to the SPECIFIC privacy concern you found. Reference specific clauses or practices from THIS policy. Include: greeting, specific concern with details, request for action/clarification, and closing. Use [Your Name] as placeholder if no name provided.
 
 Email writing guidelines:
 - Be specific - cite actual practices you found in THIS policy
@@ -135,27 +172,87 @@ Scoring guidelines:
 
 Return ONLY the JSON object, no additional text.""" + name_clause
 
+    def _build_website_only_prompt(self, website_name: str, user_name: str = "") -> str:
+        """Build prompt for when we only have website name (last resort fallback)."""
+        name_clause = ""
+        if user_name and user_name.strip():
+            name_clause = f"\n\nIMPORTANT: The user's name is '{user_name.strip()}'. Use their actual name instead of '[Your Name]'."
+        
+        return f"""You are a Privacy Lawyer Agent. The user wants to understand the privacy practices of: {website_name}
+
+We were unable to retrieve their privacy policy directly. Based on your knowledge of this website/service, provide a general privacy analysis.
+
+Provide your analysis as a JSON object with this exact structure:
+{{
+  "score": <number 0-100>,
+  "summary": "<summary based on what you know about this service's privacy practices>",
+  "red_flags": ["<known concerning practice 1>", "<known concerning practice 2>", ...],
+  "user_action_items": [
+    {{
+      "text": "<actionable recommendation>",
+      "priority": "<high|medium|low>",
+      "recipient_email": "privacy@{website_name}",
+      "email_subject": "Privacy Policy Inquiry",
+      "email_body": "<email asking about their privacy practices>"
+    }}
+  ]
+}}
+
+Be honest if you have limited knowledge about this specific service. Focus on general privacy best practices and what users should look out for.
+
+Return ONLY the JSON object, no additional text.""" + name_clause
+
+    def _assemble_mailto_link(self, recipient: str, subject: str, body: str) -> str:
+        """Assemble full Gmail mailto URL with encoded body."""
+        encoded_subject = quote(subject, safe='')
+        encoded_body = quote(body, safe='')
+        return f"https://mail.google.com/mail/?view=cm&fs=1&to={recipient}&su={encoded_subject}&body={encoded_body}"
+    
+    def _process_action_items(self, items: list) -> list:
+        """Process action items to assemble mailto links."""
+        processed = []
+        for item in items:
+            # Extract email components
+            recipient = item.get("recipient_email", "")
+            subject = item.get("email_subject", "Privacy Inquiry")
+            body = item.get("email_body", "")
+            
+            # Assemble mailto link if we have recipient
+            mailto_link = None
+            if recipient:
+                mailto_link = self._assemble_mailto_link(recipient, subject, body)
+            
+            processed.append(ActionItem(
+                text=item.get("text", ""),
+                url=item.get("url"),
+                priority=item.get("priority", "medium"),
+                reference_url=item.get("reference_url"),
+                mailto_link=mailto_link,
+                email_body=body
+            ))
+        
+        return processed
+
+    def _truncate_policy(self, policy_text: str, max_chars: int) -> str:
+        """Truncate policy text to fit within model context limit."""
+        if len(policy_text) <= max_chars:
+            return policy_text
+        
+        truncated = policy_text[:max_chars]
+        truncated += "\n[Text truncated due to length limits]"
+        logger.info(f"📄 Policy truncated: {len(policy_text):,} → {max_chars:,} chars")
+        return truncated
+
     def _generate_mock_analysis(self, policy_text: str, url: str) -> AnalysisResult:
-        """
-        Generate mock analysis for testing without API key.
-
-        Args:
-            policy_text: The privacy policy text
-            url: The URL of the privacy policy
-
-        Returns:
-            Mock AnalysisResult based on policy text characteristics
-        """
+        """Generate mock analysis for testing without API key."""
         text_lower = policy_text.lower()
         text_length = len(policy_text)
 
-        # Analyze text for concerning keywords
         concerning_keywords = [
             'third party', 'third-party', 'share', 'sell', 'indefinitely',
             'arbitration', 'waive', 'biometric', 'tracking', 'surveillance',
             'cannot control', 'may modify', 'without notice'
         ]
-
         positive_keywords = [
             'delete', 'opt out', 'opt-out', 'gdpr', 'ccpa', 'encrypted',
             'never share', 'never sell', 'your rights', 'you can', 'contact us'
@@ -164,51 +261,32 @@ Return ONLY the JSON object, no additional text.""" + name_clause
         concern_count = sum(1 for keyword in concerning_keywords if keyword in text_lower)
         positive_count = sum(1 for keyword in positive_keywords if keyword in text_lower)
 
-        # Calculate score based on characteristics
         base_score = 70
         score = base_score - (concern_count * 5) + (positive_count * 3)
 
-        # Adjust for length (very long policies are harder to understand)
         if text_length > 5000:
             score -= 10
         elif text_length < 1000:
             score += 10
 
-        # Clamp score to 0-100
         score = max(0, min(100, score))
 
-        # Generate summary based on score
         if score >= 80:
-            summary = "This privacy policy is relatively user-friendly and transparent. It clearly outlines data collection practices, provides users with control over their information, and demonstrates respect for privacy rights. The policy uses accessible language and offers straightforward options for data management."
+            summary = "This privacy policy is relatively user-friendly and transparent."
         elif score >= 50:
-            summary = "This privacy policy has moderate clarity with some areas of concern. While it outlines basic data practices, there are aspects that could be more transparent. Users should be aware of third-party data sharing and review the specific terms that apply to their usage. Some user rights are provided but may require additional steps to exercise."
+            summary = "This privacy policy has moderate clarity with some areas of concern."
         else:
-            summary = "This privacy policy raises significant concerns regarding user privacy and data protection. The policy contains vague language, extensive data collection practices, and broad third-party sharing provisions. Users should carefully consider the implications before agreeing to these terms and explore alternative services if privacy is a priority."
+            summary = "This privacy policy raises significant concerns regarding user privacy."
 
-        # Generate red flags based on concerning keywords found
         red_flags = []
         if 'third party' in text_lower or 'third-party' in text_lower:
             red_flags.append("Extensive third-party data sharing mentioned")
         if 'sell' in text_lower and 'data' in text_lower:
             red_flags.append("Policy may allow selling of user data")
-        if 'indefinitely' in text_lower:
-            red_flags.append("Data may be retained indefinitely")
-        if 'arbitration' in text_lower:
-            red_flags.append("Mandatory arbitration clause limits legal options")
-        if 'biometric' in text_lower:
-            red_flags.append("Collection of biometric data mentioned")
-        if 'tracking' in text_lower:
-            red_flags.append("User tracking across devices or websites")
-        if 'without notice' in text_lower:
-            red_flags.append("Policy can be changed without user notification")
-        if concern_count > 5 and positive_count < 3:
-            red_flags.append("Limited user control over personal data")
 
-        # Extract domain from URL for email generation
         domain = ""
         if url:
             try:
-                from urllib.parse import urlparse
                 parsed = urlparse(url)
                 domain = parsed.netloc.replace("www.", "")
             except:
@@ -216,117 +294,23 @@ Return ONLY the JSON object, no additional text.""" + name_clause
         
         base_url = url if url else "https://example.com/privacy"
 
-        # Generate action items based on score and content
         action_items = []
         if score < 70:
             email_body = """Dear Privacy Team,
 
-I am writing to request information about how I can limit the data sharing practices outlined in your privacy policy. After reviewing your policy, I have concerns about the extent of data collection and sharing with third parties.
-
-Specifically, I would like to:
-1. Understand what options I have to opt out of data sharing
-2. Request a list of third parties my data has been shared with
-3. Learn how I can minimize the data collected about me
+I am writing to request information about how I can limit the data sharing practices outlined in your privacy policy.
 
 Please respond with the steps I can take to exercise my privacy rights.
 
-Thank you for your attention to this matter.
-
-Sincerely,
+Thank you,
 [Your Name]"""
             
             action_items.append(ActionItem(
                 text="Review privacy settings and limit data sharing where possible",
                 priority="high",
                 reference_url=f"{base_url}#data-sharing",
-                mailto_link=f"https://mail.google.com/mail/?view=cm&fs=1&to=privacy@{domain}&su={quote('Request to Limit Data Sharing')}&body={quote(email_body)}",
+                mailto_link=self._assemble_mailto_link(f"privacy@{domain}", "Request to Limit Data Sharing", email_body),
                 email_body=email_body
-            ))
-        if 'opt out' in text_lower or 'opt-out' in text_lower:
-            email_body = """Dear Privacy Team,
-
-I am writing to exercise my right to opt out of certain data collection and sharing practices as mentioned in your privacy policy.
-
-Please process my opt-out request for:
-- Marketing communications
-- Data sharing with third-party advertisers
-- Cross-site tracking
-
-Please confirm once my opt-out preferences have been updated.
-
-Thank you,
-[Your Name]"""
-            
-            action_items.append(ActionItem(
-                text="Look for opt-out options in your account settings",
-                url=url + "#settings" if url else None,
-                priority="medium",
-                reference_url=f"{base_url}#opt-out",
-                mailto_link=f"https://mail.google.com/mail/?view=cm&fs=1&to=privacy@{domain}&su={quote('Opt-Out Request')}&body={quote(email_body)}",
-                email_body=email_body
-            ))
-        if score < 50:
-            email_body1 = """Dear Privacy Team,
-
-I am writing to express my concerns regarding the data collection practices outlined in your privacy policy. The extent of data collection appears to be quite extensive and I would like clarification on the following:
-
-1. What is the legal basis for collecting this data?
-2. Is all this data collection strictly necessary for providing the service?
-3. How long is my personal data retained?
-
-I would appreciate a detailed response addressing these concerns.
-
-Best regards,
-[Your Name]"""
-            
-            action_items.append(ActionItem(
-                text="Consider using privacy-focused alternatives to this service",
-                priority="high",
-                reference_url=f"{base_url}#data-collection",
-                mailto_link=f"https://mail.google.com/mail/?view=cm&fs=1&to=privacy@{domain}&su={quote('Privacy Concerns Regarding Data Collection')}&body={quote(email_body1)}",
-                email_body=email_body1
-            ))
-            email_body2 = """Dear Privacy Team,
-
-I have reviewed your privacy policy and noticed references to tracking technologies. I would like to better understand:
-
-1. What tracking technologies are used on your platform?
-2. How can I disable or limit this tracking?
-3. Do you honor Do Not Track browser signals?
-
-Thank you for your transparency.
-
-Regards,
-[Your Name]"""
-            
-            action_items.append(ActionItem(
-                text="Use a VPN and privacy browser extensions when using this service",
-                priority="medium",
-                reference_url=f"{base_url}#tracking",
-                mailto_link=f"https://mail.google.com/mail/?view=cm&fs=1&to=privacy@{domain}&su={quote('Question About Tracking Practices')}&body={quote(email_body2)}",
-                email_body=email_body2
-            ))
-        if 'delete' in text_lower:
-            email_body3 = """Dear Privacy Team,
-
-Pursuant to my rights under applicable data protection laws, I am writing to request the deletion of all personal data you hold about me.
-
-Please confirm:
-1. Receipt of this deletion request
-2. The timeline for completing the deletion
-3. Any data that cannot be deleted and the reason why
-
-Please send confirmation once my data has been fully deleted from your systems.
-
-Thank you,
-[Your Name]"""
-            
-            action_items.append(ActionItem(
-                text="Exercise your right to delete your data if you no longer use the service",
-                priority="low",
-                reference_url=f"{base_url}#user-rights",
-                mailto_link=f"https://mail.google.com/mail/?view=cm&fs=1&to=privacy@{domain}&su={quote('Data Deletion Request')}&body={quote(email_body3)}",
-                email_body=email_body3
             ))
 
         return AnalysisResult(
@@ -346,110 +330,114 @@ Thank you,
         user_groq_api_key: str = ""
     ) -> AnalysisResult:
         """
-        Sends policy text to Groq LLM with automatic model and key rotation.
+        Analyze policy with fallback chain across multiple models and providers.
 
-        Args:
-            policy_text: The privacy policy text to analyze (max 50,000 chars)
-            url: The URL of the privacy policy
-            user_name: Optional user name for personalized emails
-            user_groq_api_key: Optional user-provided API key
-
-        Returns:
-            AnalysisResult object with score, summary, red flags, and action items
-
-        Raises:
-            Exception: If all models and keys fail
+        Fallback order:
+        1. openai/gpt-oss-120b:free (OpenRouter) - 8k context
+        2. groq/compound - 70k context
+        3. llama-3.3-70b-versatile - 12k context
+        4. groq/compound-mini - 70k context
+        5. moonshotai/kimi-k2-instruct-0905 - 10k (no policy, just website name)
         """
-        # If in test mode and no user key provided, return mock analysis
         if self.test_mode and not user_groq_api_key:
             logger.debug("Using mock analysis (test mode)")
             return self._generate_mock_analysis(policy_text, url)
 
-        # Truncate policy text to 50,000 characters
-        original_length = len(policy_text)
-        truncated_text = policy_text[:50000]
-        if original_length > 50000:
-            truncated_text += "\n[Text truncated at 50,000 characters]"
-            logger.info(f"📄 Policy text truncated: {original_length:,} → 50,000 chars")
-
-        # Build system prompt with user name if provided
         system_prompt = self._build_system_prompt(user_name)
-
-        # Track key rotation attempts
-        max_key_rotations = 10  # Avoid infinite loops
-        key_rotation_count = 0
         
-        # Try each model in sequence until one succeeds
-        last_error = None
-        for attempt, model in enumerate(self.models):
-            while key_rotation_count < max_key_rotations:
-                try:
-                    # Get client with appropriate key
-                    client = self._get_client(user_groq_api_key if attempt == 0 and key_rotation_count == 0 else None)
-                    
-                    logger.debug(f"Attempt {attempt + 1}/{len(self.models)} - Trying model: {model}")
-                    start_time = time.time()
-                    
-                    # Increment request count
-                    self.key_manager.increment_request_count()
+        # Extract website name from URL for last fallback
+        website_name = ""
+        if url:
+            try:
+                parsed = urlparse(url)
+                website_name = parsed.netloc.replace("www.", "")
+            except:
+                website_name = url
 
-                    # Special handling for groq/compound - it has web search
-                    if model == "groq/compound":
-                        # Just send the URL and let it search and analyze
-                        response = client.chat.completions.create(
-                            model=model,
-                            messages=[
-                                {"role": "system", "content": system_prompt},
-                                {"role": "user", "content": f"""Please use your web search capability to access and analyze the privacy policy at this URL: {url}
+        last_error = None
+        max_key_rotations = 10
+        
+        for attempt, (model, provider) in enumerate(FALLBACK_MODELS):
+            is_last_fallback = (attempt == len(FALLBACK_MODELS) - 1)
+            context_limit = MODEL_CONTEXT_LIMITS.get(model, 50000)
+            
+            # Last fallback: only send website name, no policy text
+            if is_last_fallback:
+                logger.info(f"🆘 Last resort fallback: {model} (no policy text, just website name)")
+                prompt_text = self._build_website_only_prompt(website_name, user_name)
+                user_message = f"Analyze the privacy practices of: {website_name}"
+            else:
+                # Truncate policy to model's context limit
+                truncated_text = self._truncate_policy(policy_text, context_limit) if policy_text else ""
+                
+                # Special handling for groq/compound - it has web search
+                if model in ["groq/compound", "groq/compound-mini"]:
+                    if not policy_text:
+                        user_message = f"""Please use your web search capability to access and analyze the privacy policy at this URL: {url}
 
 Search for and read the privacy policy, then provide your analysis in the required JSON format.
 
-URL to analyze: {url}"""}
-                            ],
-                            temperature=0.3,
-                            max_tokens=2000,
-                            response_format={"type": "json_object"}
-                        )
+URL to analyze: {url}"""
                     else:
-                        # Normal models - send the policy text
+                        user_message = f"Analyze this privacy policy:\n\n{truncated_text}"
+                else:
+                    user_message = f"Analyze this privacy policy:\n\n{truncated_text}"
+                
+                prompt_text = system_prompt
+            
+            key_rotation_count = 0
+            
+            while key_rotation_count < max_key_rotations:
+                try:
+                    logger.debug(f"Attempt {attempt + 1}/{len(FALLBACK_MODELS)} - {model} ({provider})")
+                    start_time = time.time()
+                    
+                    messages = [
+                        {"role": "system", "content": prompt_text},
+                        {"role": "user", "content": user_message}
+                    ]
+                    
+                    if provider == "openrouter":
+                        # OpenRouter API call
+                        response_data = self._call_openrouter(model, messages, context_limit)
+                        content = response_data["choices"][0]["message"]["content"]
+                    else:
+                        # Groq API call
+                        client = self._get_groq_client(user_groq_api_key if attempt == 0 and key_rotation_count == 0 else None)
+                        self.key_manager.increment_request_count()
+                        
                         response = client.chat.completions.create(
                             model=model,
-                            messages=[
-                                {"role": "system", "content": system_prompt},
-                                {"role": "user", "content": f"Analyze this privacy policy:\n\n{truncated_text}"}
-                            ],
+                            messages=messages,
                             temperature=0.3,
                             max_tokens=2000,
                             response_format={"type": "json_object"}
                         )
-
-                    # Parse the response
+                        content = response.choices[0].message.content
+                    
                     api_duration = (time.time() - start_time) * 1000
                     logger.info(f"✅ Model {model} succeeded in {api_duration:.0f}ms")
-
-                    content = response.choices[0].message.content
+                    
+                    # Parse JSON response
                     result_dict = json.loads(content)
-
-                    # Validate response structure
+                    
                     if not self._validate_response(result_dict):
                         logger.warning(f"Invalid response from {model}, trying next model...")
-                        break  # Exit key rotation loop, try next model
-
-                    # Log analysis results
+                        break
+                    
+                    # Log results
                     score = result_dict["score"]
                     num_red_flags = len(result_dict.get("red_flags", []))
                     num_actions = len(result_dict.get("user_action_items", []))
                     logger.info(f"📊 Analysis - Score: {score}/100, Red flags: {num_red_flags}, Actions: {num_actions}")
-
-                    # Convert to AnalysisResult model
-                    action_items = [
-                        ActionItem(**item) for item in result_dict.get("user_action_items", [])
-                    ]
-
-                    # Update current model for next request
+                    
+                    # Process action items (assemble mailto links)
+                    action_items = self._process_action_items(result_dict.get("user_action_items", []))
+                    
+                    # Update current deployment info
                     self.deployment = model
-                    self.current_model_index = attempt
-
+                    self.provider = provider
+                    
                     return AnalysisResult(
                         score=result_dict["score"],
                         summary=result_dict["summary"],
@@ -458,49 +446,41 @@ URL to analyze: {url}"""}
                         timestamp=datetime.now(timezone.utc),
                         url=url
                     )
-
+                    
                 except json.JSONDecodeError as e:
                     logger.warning(f"❌ Model {model} returned invalid JSON: {e}")
                     last_error = e
-                    break  # Try next model
+                    break
                     
                 except Exception as e:
                     error_str = str(e).lower()
                     
-                    # Check for rate limit error (429)
+                    # Check for rate limit
                     if "rate_limit" in error_str or "429" in error_str or "too many requests" in error_str:
-                        logger.warning(f"⚠️ Rate limit hit on current key, rotating...")
-                        next_key = self.key_manager.mark_rate_limited()
+                        if provider == "groq":
+                            logger.warning(f"⚠️ Rate limit hit on Groq key, rotating...")
+                            next_key = self.key_manager.mark_rate_limited()
+                            
+                            if next_key:
+                                key_rotation_count += 1
+                                logger.info(f"🔄 Rotated to next key (rotation #{key_rotation_count})")
+                                continue
                         
-                        if next_key:
-                            key_rotation_count += 1
-                            logger.info(f"🔄 Rotated to next key (rotation #{key_rotation_count})")
-                            continue  # Retry with new key
-                        else:
-                            logger.error("All keys exhausted, trying next model...")
-                            last_error = e
-                            break  # Try next model
+                        logger.warning(f"⚠️ Rate limit on {provider}, trying next model...")
+                        last_error = e
+                        break
                     else:
                         logger.warning(f"❌ Model {model} failed: {type(e).__name__}: {e}")
                         last_error = e
-                        break  # Try next model
+                        break
             
-            # Reset key rotation count for next model
+            # Reset key rotation for next model
             key_rotation_count = 0
 
-        # All models failed
-        logger.error(f"💥 All {len(self.models)} models failed!")
+        logger.error(f"💥 All {len(FALLBACK_MODELS)} models failed!")
         raise Exception(f"All LLM models failed. Last error: {str(last_error)}")
 
     def _validate_response(self, response: Dict[str, Any]) -> bool:
-        """
-        Validates LLM response contains required fields.
-
-        Args:
-            response: Dictionary parsed from LLM JSON response
-
-        Returns:
-            True if response is valid, False otherwise
-        """
+        """Validates LLM response contains required fields."""
         required_fields = ["score", "summary", "red_flags", "user_action_items"]
         return all(field in response for field in required_fields)
