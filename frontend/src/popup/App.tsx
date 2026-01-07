@@ -55,23 +55,22 @@ function AppContent() {
       // Send URL to backend - it handles everything (discovery + analysis)
       setLoading({ phase: 'discovering', message: 'Searching for privacy policy...' });
 
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 60000); // 60s timeout for full flow
-
       try {
         const response = await fetch(`${config.apiUrl}/analyze`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            'Cache-Control': 'no-cache, no-store, must-revalidate',
+            'Pragma': 'no-cache'
+          },
           body: JSON.stringify({
             policy_text: '',
             url: tab.url,
             user_name: userSettings.userName || '',
             user_groq_api_key: userSettings.groqApiKey || '',
           }),
-          signal: controller.signal,
+          cache: 'no-store',
         });
-
-        clearTimeout(timeoutId);
 
         if (!response.ok) {
           const errorData = await response.json().catch(() => ({}));
@@ -83,14 +82,8 @@ function AppContent() {
         setLoading({ phase: 'done', message: '' });
 
       } catch (err) {
-        clearTimeout(timeoutId);
-
         if (err instanceof Error) {
-          if (err.name === 'AbortError') {
-            setError('Request timed out. The site may be slow or blocking requests.');
-          } else {
-            setError(err.message);
-          }
+          setError(err.message);
         } else {
           setError('Unknown error occurred');
         }
