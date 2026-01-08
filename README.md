@@ -1,11 +1,11 @@
 # Hercule
 
-A browser extension that leverages Groq LLM to democratize privacy policy comprehension. The system analyzes privacy policies and presents them through an intuitive traffic-light interface with actionable insights.
+A browser extension that leverages azure to democratize privacy policy comprehension. The system analyzes privacy policies and presents them through an intuitive interface with actionable insights.
 
 ## Features
 
 - **Privacy Policy Analysis** - AI-powered analysis of privacy policies
-- **Traffic Light Score** - Easy-to-understand 0-100 privacy score
+- **Score** - Easy-to-understand 0-100 privacy score
 - **Red Flags Detection** - Highlights concerning privacy practices
 - **Action Items** - Personalized recommendations with one-click email templates
 - **Smart Discovery** - Automatically finds privacy policies on any website
