@@ -8,6 +8,7 @@ import RedFlags from './components/RedFlags';
 import ActionItems from './components/ActionItems';
 import { Icons } from './components/Icons';
 import Settings, { useUserSettings } from './components/Settings';
+import WaitingScreen from './components/WaitingScreen';
 
 type LoadingPhase = 'idle' | 'discovering' | 'analyzing' | 'done' | 'error';
 
@@ -97,14 +98,7 @@ function AppContent() {
     }
   };
 
-  const getProgressWidth = () => {
-    switch (loading.phase) {
-      case 'discovering': return 'w-1/3';
-      case 'analyzing': return 'w-2/3';
-      case 'done': return 'w-full';
-      default: return 'w-0';
-    }
-  };
+
 
   return (
     <div className="w-full min-h-screen bg-transparent selection:bg-indigo-500/30">
@@ -136,36 +130,7 @@ function AppContent() {
       <main className="p-6">
         {/* Loading State */}
         {(loading.phase === 'discovering' || loading.phase === 'analyzing') && (
-          <div className="flex flex-col items-center justify-center py-20 animate-fade-in-scale">
-            <div className="relative mb-10">
-              <div className={`absolute inset-0 rounded-full blur-2xl transition-colors duration-1000 ${loading.phase === 'analyzing' ? 'bg-emerald-500/20' : 'bg-indigo-500/20'} animate-pulse`}></div>
-              <div className="w-16 h-16 relative">
-                <div className="absolute inset-0 border-4 border-slate-800/50 rounded-full"></div>
-                <div className={`absolute inset-0 border-4 border-t-current border-r-transparent border-b-transparent border-l-transparent rounded-full animate-spin transition-colors duration-1000 ${loading.phase === 'analyzing' ? 'text-emerald-400' : 'text-indigo-500'}`}></div>
-              </div>
-            </div>
-
-            <p className="text-slate-200 font-medium text-base mb-2 animate-fade-in-scale h-6">
-              {loading.message}
-            </p>
-
-            <p className="text-slate-500 text-xs mb-6">
-              {loading.phase === 'discovering'
-                ? 'Checking common paths, scraping links, searching...'
-                : 'AI is analyzing the policy...'}
-            </p>
-
-            <div className="flex items-center gap-4 mt-4 w-full max-w-[200px]">
-              <div className="flex-1 h-1 bg-slate-800 rounded-full overflow-hidden">
-                <div className={`h-full transition-all duration-1000 ease-out bg-indigo-500 ${getProgressWidth()}`}></div>
-              </div>
-            </div>
-            <div className="flex justify-between w-full max-w-[200px] mt-2 text-[10px] uppercase tracking-wider font-semibold">
-              <span className={loading.phase === 'discovering' ? 'text-indigo-400' : 'text-emerald-400'}>Find</span>
-              <span className={loading.phase === 'analyzing' ? 'text-indigo-400' : 'text-slate-600'}>Analyze</span>
-              <span className="text-slate-600">Done</span>
-            </div>
-          </div>
+          <WaitingScreen />
         )}
 
         {/* Error State */}
