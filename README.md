@@ -2,6 +2,9 @@
 
 A browser extension that leverages azure to democratize privacy policy comprehension. The system analyzes privacy policies and presents them through an intuitive interface with actionable insights.
 
+<img width="11034" height="22765" alt="Mermaid Chart - Create complex, visual diagrams with text -2026-01-08-080404" src="https://github.com/user-attachments/assets/cd9dd860-5a63-4ae9-93b1-e85a9940bb3b" />
+
+
 ## Features
 
 - **Privacy Policy Analysis** - AI-powered analysis of privacy policies
