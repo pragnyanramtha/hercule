@@ -386,10 +386,12 @@ URL to analyze: {url}"""
                 prompt_text = system_prompt
             
             key_rotation_count = 0
+            invalid_response_retries = 0
+            max_invalid_retries = 2  # Retry up to 2 times for invalid responses on same model
             
             while key_rotation_count < max_key_rotations:
                 try:
-                    logger.debug(f"Attempt {attempt + 1}/{len(FALLBACK_MODELS)} - {model} ({provider})")
+                    logger.info(f"🤖 Attempt {attempt + 1}/{len(FALLBACK_MODELS)} - {model} ({provider})")
                     start_time = time.time()
                     
                     messages = [
@@ -416,19 +418,37 @@ URL to analyze: {url}"""
                         content = response.choices[0].message.content
                     
                     api_duration = (time.time() - start_time) * 1000
-                    logger.info(f"✅ Model {model} succeeded in {api_duration:.0f}ms")
+                    logger.info(f"📡 API response from {model} in {api_duration:.0f}ms")
                     
-                    # Parse JSON response
-                    result_dict = json.loads(content)
+                    # Try to extract and parse JSON from response
+                    result_dict = self._extract_json_from_response(content)
                     
-                    if not self._validate_response(result_dict):
-                        logger.warning(f"Invalid response from {model}, trying next model...")
+                    if result_dict is None:
+                        logger.warning(f"❌ Could not parse JSON from {model} response")
+                        invalid_response_retries += 1
+                        if invalid_response_retries < max_invalid_retries:
+                            logger.info(f"🔄 Retrying {model} ({invalid_response_retries}/{max_invalid_retries})...")
+                            continue
+                        logger.warning(f"❌ Max retries reached for {model}, trying next model...")
+                        last_error = ValueError("Could not parse JSON response")
                         break
                     
-                    # Log results
+                    # Validate response content quality
+                    if not self._validate_response(result_dict):
+                        logger.warning(f"❌ Invalid/low-quality response from {model}")
+                        invalid_response_retries += 1
+                        if invalid_response_retries < max_invalid_retries:
+                            logger.info(f"🔄 Retrying {model} for better response ({invalid_response_retries}/{max_invalid_retries})...")
+                            continue
+                        logger.warning(f"❌ Max retries reached for {model}, trying next model...")
+                        last_error = ValueError("Response validation failed")
+                        break
+                    
+                    # Log successful results
                     score = result_dict["score"]
                     num_red_flags = len(result_dict.get("red_flags", []))
                     num_actions = len(result_dict.get("user_action_items", []))
+                    logger.info(f"✅ Model {model} succeeded!")
                     logger.info(f"📊 Analysis - Score: {score}/100, Red flags: {num_red_flags}, Actions: {num_actions}")
                     
                     # Process action items (assemble mailto links)
@@ -448,14 +468,18 @@ URL to analyze: {url}"""
                     )
                     
                 except json.JSONDecodeError as e:
-                    logger.warning(f"❌ Model {model} returned invalid JSON: {e}")
+                    logger.warning(f"❌ Model {model} returned unparseable JSON: {e}")
+                    invalid_response_retries += 1
+                    if invalid_response_retries < max_invalid_retries:
+                        logger.info(f"🔄 Retrying {model} ({invalid_response_retries}/{max_invalid_retries})...")
+                        continue
                     last_error = e
                     break
                     
                 except Exception as e:
                     error_str = str(e).lower()
                     
-                    # Check for rate limit
+                    # Check for rate limit errors
                     if "rate_limit" in error_str or "429" in error_str or "too many requests" in error_str:
                         if provider == "groq":
                             logger.warning(f"⚠️ Rate limit hit on Groq key, rotating...")
@@ -463,24 +487,159 @@ URL to analyze: {url}"""
                             
                             if next_key:
                                 key_rotation_count += 1
-                                logger.info(f"🔄 Rotated to next key (rotation #{key_rotation_count})")
+                                logger.info(f"🔄 Rotated to next Groq key (rotation #{key_rotation_count})")
                                 continue
                         
                         logger.warning(f"⚠️ Rate limit on {provider}, trying next model...")
                         last_error = e
                         break
+                    
+                    # Check for context length errors
+                    elif "context" in error_str or "too long" in error_str or "tokens" in error_str:
+                        logger.warning(f"⚠️ Context too long for {model}, trying next model with lower limit...")
+                        last_error = e
+                        break
+                    
+                    # Check for model unavailability
+                    elif "unavailable" in error_str or "503" in error_str or "502" in error_str:
+                        logger.warning(f"⚠️ Model {model} temporarily unavailable, trying next...")
+                        last_error = e
+                        break
+                    
+                    # Generic error - try next model
                     else:
-                        logger.warning(f"❌ Model {model} failed: {type(e).__name__}: {e}")
+                        logger.warning(f"❌ Model {model} failed: {type(e).__name__}: {str(e)[:100]}")
                         last_error = e
                         break
             
-            # Reset key rotation for next model
+            # Reset counters for next model
             key_rotation_count = 0
+            invalid_response_retries = 0
 
         logger.error(f"💥 All {len(FALLBACK_MODELS)} models failed!")
         raise Exception(f"All LLM models failed. Last error: {str(last_error)}")
 
     def _validate_response(self, response: Dict[str, Any]) -> bool:
-        """Validates LLM response contains required fields."""
+        """
+        Validates LLM response contains required fields with quality content.
+        Returns True if valid, False if should try another model.
+        """
         required_fields = ["score", "summary", "red_flags", "user_action_items"]
-        return all(field in response for field in required_fields)
+        
+        # Check all required fields exist
+        for field in required_fields:
+            if field not in response:
+                logger.warning(f"❌ Missing required field: {field}")
+                return False
+        
+        # Validate score is a number between 0-100
+        score = response.get("score")
+        if not isinstance(score, (int, float)) or score < 0 or score > 100:
+            logger.warning(f"❌ Invalid score value: {score}")
+            return False
+        
+        # Validate summary has meaningful content (at least 50 characters)
+        summary = response.get("summary", "")
+        if not isinstance(summary, str) or len(summary.strip()) < 50:
+            logger.warning(f"❌ Summary too short or invalid: {len(summary) if isinstance(summary, str) else 'not a string'} chars")
+            return False
+        
+        # Validate red_flags is a list
+        red_flags = response.get("red_flags")
+        if not isinstance(red_flags, list):
+            logger.warning(f"❌ red_flags is not a list: {type(red_flags)}")
+            return False
+        
+        # Validate user_action_items is a list
+        action_items = response.get("user_action_items")
+        if not isinstance(action_items, list):
+            logger.warning(f"❌ user_action_items is not a list: {type(action_items)}")
+            return False
+        
+        # Validate action items have required fields
+        for i, item in enumerate(action_items):
+            if not isinstance(item, dict):
+                logger.warning(f"❌ Action item {i} is not a dict")
+                return False
+            if not item.get("text"):
+                logger.warning(f"❌ Action item {i} missing 'text' field")
+                return False
+        
+        logger.debug(f"✅ Response validation passed - score: {score}, summary: {len(summary)} chars, flags: {len(red_flags)}, actions: {len(action_items)}")
+        return True
+
+    def _extract_json_from_response(self, content: str) -> Optional[Dict[str, Any]]:
+        """
+        Attempts to extract valid JSON from LLM response.
+        Handles cases where model returns markdown-wrapped JSON or extra text.
+        """
+        if not content:
+            return None
+        
+        content = content.strip()
+        
+        # Try direct parse first
+        try:
+            return json.loads(content)
+        except json.JSONDecodeError:
+            pass
+        
+        # Try to extract JSON from markdown code blocks
+        json_patterns = [
+            r'```json\s*([\s\S]*?)\s*```',  # ```json ... ```
+            r'```\s*([\s\S]*?)\s*```',       # ``` ... ```
+            r'\{[\s\S]*\}',                  # Raw JSON object
+        ]
+        
+        for pattern in json_patterns:
+            match = re.search(pattern, content)
+            if match:
+                try:
+                    json_str = match.group(1) if '```' in pattern else match.group(0)
+                    return json.loads(json_str)
+                except (json.JSONDecodeError, IndexError):
+                    continue
+        
+        return None
+
+    def _make_llm_request(
+        self, 
+        model: str, 
+        provider: str, 
+        messages: list, 
+        context_limit: int,
+        user_groq_api_key: str = ""
+    ) -> Dict[str, Any]:
+        """
+        Make a single LLM request and return parsed JSON response.
+        Raises exception on failure.
+        """
+        start_time = time.time()
+        
+        if provider == "openrouter":
+            response_data = self._call_openrouter(model, messages, context_limit)
+            content = response_data["choices"][0]["message"]["content"]
+        else:
+            client = self._get_groq_client(user_groq_api_key if user_groq_api_key else None)
+            self.key_manager.increment_request_count()
+            
+            response = client.chat.completions.create(
+                model=model,
+                messages=messages,
+                temperature=0.3,
+                max_tokens=2000,
+                response_format={"type": "json_object"}
+            )
+            content = response.choices[0].message.content
+        
+        api_duration = (time.time() - start_time) * 1000
+        logger.info(f"📡 API call to {model} completed in {api_duration:.0f}ms")
+        
+        # Try to extract JSON from response
+        result_dict = self._extract_json_from_response(content)
+        
+        if result_dict is None:
+            raise ValueError(f"Could not parse JSON from response: {content[:200]}...")
+        
+        return result_dict
+
