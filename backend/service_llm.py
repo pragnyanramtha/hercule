@@ -25,14 +25,28 @@ MODEL_CONTEXT_LIMITS = {
     "moonshotai/kimi-k2-instruct-0905": 10000,  # No policy, just website
 }
 
-# Model order for fallback chain
-FALLBACK_MODELS = [
+# Model order for fallback chain - WHEN POLICY TEXT IS AVAILABLE
+FALLBACK_MODELS_WITH_TEXT = [
     ("nvidia/nemotron-3-nano-30b-a3b:free", "openrouter"),
     ("groq/compound", "groq"),
     ("llama-3.3-70b-versatile", "groq"),
     ("groq/compound-mini", "groq"),
-    ("moonshotai/kimi-k2-instruct-0905", "groq"),  # Last resort - no policy text
+    ("moonshotai/kimi-k2-instruct-0905", "groq"),  # Last resort
 ]
+
+# Model order for fallback chain - WHEN NO POLICY TEXT (URL only)
+# Prioritizes models with web search capability
+FALLBACK_MODELS_URL_ONLY = [
+    ("groq/compound", "groq"),              # Best: has web search capability
+    ("groq/compound-mini", "groq"),         # Also has web search
+    ("moonshotai/kimi-k2-instruct-0905", "groq"),  # Knowledge-based fallback
+    ("nvidia/nemotron-3-nano-30b-a3b:free", "openrouter"),  # Try anyway
+    ("llama-3.3-70b-versatile", "groq"),    # Last resort
+]
+
+# Backwards compatibility alias
+FALLBACK_MODELS = FALLBACK_MODELS_WITH_TEXT
+
 
 
 class LLMService:
@@ -172,35 +186,97 @@ Scoring guidelines:
 
 Return ONLY the JSON object, no additional text.""" + name_clause
 
-    def _build_website_only_prompt(self, website_name: str, user_name: str = "") -> str:
-        """Build prompt for when we only have website name (last resort fallback)."""
+    def _build_url_only_system_prompt(self, website_url: str, website_name: str, user_name: str = "", has_web_search: bool = False) -> str:
+        """
+        Build system prompt for URL-only analysis (no policy text available).
+        Different prompts for models with/without web search capability.
+        """
         name_clause = ""
         if user_name and user_name.strip():
-            name_clause = f"\n\nIMPORTANT: The user's name is '{user_name.strip()}'. Use their actual name instead of '[Your Name]'."
+            name_clause = f"\n\nIMPORTANT: The user's name is '{user_name.strip()}'. Use their actual name instead of '[Your Name]' in any email templates."
         
-        return f"""You are a Privacy Lawyer Agent. The user wants to understand the privacy practices of: {website_name}
+        if has_web_search:
+            # Prompt for models with web search capability (groq/compound)
+            return f"""You are a Privacy Lawyer Agent with web search capability.
 
-We were unable to retrieve their privacy policy directly. Based on your knowledge of this website/service, provide a general privacy analysis.
+The user wants to analyze the privacy practices of: {website_name}
+Website URL: {website_url}
 
-Provide your analysis as a JSON object with this exact structure:
+YOUR TASK:
+1. Use your web search capability to find and read the privacy policy for {website_name}
+2. Search for: "{website_name} privacy policy" or visit {website_url}/privacy
+3. Analyze the privacy policy you find and provide a comprehensive report
+
+After finding and analyzing the privacy policy, provide your analysis as a JSON object with this EXACT structure:
 {{
   "score": <number 0-100>,
-  "summary": "<summary based on what you know about this service's privacy practices>",
-  "red_flags": ["<known concerning practice 1>", "<known concerning practice 2>", ...],
+  "summary": "<4-5 sentence summary of key privacy practices and concerns you found>",
+  "red_flags": ["<concerning practice 1>", "<concerning practice 2>", "<at least 3-5 red flags>"],
+  "user_action_items": [
+    {{
+      "text": "<specific actionable recommendation>",
+      "url": "<relevant settings URL if known>",
+      "priority": "<high|medium|low>",
+      "reference_url": "<URL to specific section of policy>",
+      "recipient_email": "<privacy contact email>",
+      "email_subject": "<specific subject line>",
+      "email_body": "<personalized 2-3 paragraph email>"
+    }}
+  ]
+}}
+
+MINIMUM REQUIREMENTS:
+- "summary": At least 4-5 detailed sentences
+- "red_flags": At least 3 items
+- "user_action_items": At least 3 items with complete email templates
+
+Scoring guidelines:
+- 80-100: User-friendly, clear rights, strong privacy protections
+- 50-79: Moderate concerns, some unclear terms or data sharing  
+- 0-49: Significant concerns, vague language, extensive data collection/sharing
+
+Return ONLY the JSON object, no additional text.""" + name_clause
+        
+        else:
+            # Prompt for models WITHOUT web search (use general knowledge)
+            return f"""You are a Privacy Lawyer Agent. The user wants to understand the privacy practices of: {website_name}
+Website URL: {website_url}
+
+We were unable to retrieve their privacy policy directly. Based on your knowledge of this website/service and common industry practices, provide a privacy analysis.
+
+Provide your analysis as a JSON object with this EXACT structure:
+{{
+  "score": <number 0-100>,
+  "summary": "<4-5 sentence summary based on what you know about this service's typical privacy practices>",
+  "red_flags": ["<known or likely concerning practice 1>", "<practice 2>", "<at least 3-5 items>"],
   "user_action_items": [
     {{
       "text": "<actionable recommendation>",
       "priority": "<high|medium|low>",
       "recipient_email": "privacy@{website_name}",
       "email_subject": "Privacy Policy Inquiry",
-      "email_body": "<email asking about their privacy practices>"
+      "email_body": "<2-3 paragraph email requesting information>"
     }}
   ]
 }}
 
-Be honest if you have limited knowledge about this specific service. Focus on general privacy best practices and what users should look out for.
+MINIMUM REQUIREMENTS:
+- "summary": At least 4-5 sentences
+- "red_flags": At least 3 items
+- "user_action_items": At least 3 items
+
+Be conservative with scoring if you're uncertain. Focus on general privacy best practices and what users should look out for with this type of service.
 
 Return ONLY the JSON object, no additional text.""" + name_clause
+
+    def _build_website_only_prompt(self, website_name: str, user_name: str = "") -> str:
+        """Legacy method - redirects to new URL-only prompt without web search."""
+        return self._build_url_only_system_prompt(
+            website_url=f"https://{website_name}",
+            website_name=website_name,
+            user_name=user_name,
+            has_web_search=False
+        )
 
     def _assemble_mailto_link(self, recipient: str, subject: str, body: str) -> str:
         """Assemble full Gmail mailto URL with encoded body."""
@@ -332,58 +408,79 @@ Thank you,
         """
         Analyze policy with fallback chain across multiple models and providers.
 
-        Fallback order:
-        1. openai/gpt-oss-120b:free (OpenRouter) - 8k context
-        2. groq/compound - 70k context
-        3. llama-3.3-70b-versatile - 12k context
+        When policy text IS available:
+        1. nvidia/nemotron (OpenRouter) - Full context
+        2. groq/compound - 70k context + web search
+        3. llama-3.3-70b - 12k context
         4. groq/compound-mini - 70k context
-        5. moonshotai/kimi-k2-instruct-0905 - 10k (no policy, just website name)
+        5. kimi-k2 - Knowledge-based fallback
+
+        When NO policy text (URL only):
+        1. groq/compound - Web search to find policy
+        2. groq/compound-mini - Web search backup
+        3. kimi-k2 - Knowledge-based analysis
+        4. nvidia/nemotron - Try anyway
+        5. llama-3.3-70b - Last resort
         """
         if self.test_mode and not user_groq_api_key:
             logger.debug("Using mock analysis (test mode)")
             return self._generate_mock_analysis(policy_text, url)
 
-        system_prompt = self._build_system_prompt(user_name)
-        
-        # Extract website name from URL for last fallback
+        # Extract website info from URL
         website_name = ""
+        website_url = url or ""
         if url:
             try:
                 parsed = urlparse(url)
                 website_name = parsed.netloc.replace("www.", "")
             except:
                 website_name = url
+        
+        # Determine if we have policy text
+        has_policy_text = bool(policy_text and policy_text.strip())
+        
+        # Select appropriate fallback chain
+        if has_policy_text:
+            fallback_chain = FALLBACK_MODELS_WITH_TEXT
+            logger.info(f"📄 Policy text available ({len(policy_text):,} chars) - using standard model chain")
+        else:
+            fallback_chain = FALLBACK_MODELS_URL_ONLY
+            logger.info(f"🔗 No policy text - using URL-only chain (web search models first)")
 
+        # Models with web search capability
+        web_search_models = ["groq/compound", "groq/compound-mini"]
+        
         last_error = None
         max_key_rotations = 10
         
-        for attempt, (model, provider) in enumerate(FALLBACK_MODELS):
-            is_last_fallback = (attempt == len(FALLBACK_MODELS) - 1)
+        for attempt, (model, provider) in enumerate(fallback_chain):
+            is_last_fallback = (attempt == len(fallback_chain) - 1)
             context_limit = MODEL_CONTEXT_LIMITS.get(model, 50000)
+            has_web_search = model in web_search_models
             
-            # Last fallback: only send website name, no policy text
-            if is_last_fallback:
-                logger.info(f"🆘 Last resort fallback: {model} (no policy text, just website name)")
-                prompt_text = self._build_website_only_prompt(website_name, user_name)
-                user_message = f"Analyze the privacy practices of: {website_name}"
+            # Build appropriate prompt based on situation
+            if has_policy_text:
+                # Standard analysis with policy text
+                truncated_text = self._truncate_policy(policy_text, context_limit)
+                prompt_text = self._build_system_prompt(user_name)
+                user_message = f"Analyze this privacy policy:\n\n{truncated_text}"
             else:
-                # Truncate policy to model's context limit
-                truncated_text = self._truncate_policy(policy_text, context_limit) if policy_text else ""
+                # URL-only analysis
+                prompt_text = self._build_url_only_system_prompt(
+                    website_url=website_url,
+                    website_name=website_name,
+                    user_name=user_name,
+                    has_web_search=has_web_search
+                )
                 
-                # Special handling for groq/compound - it has web search
-                if model in ["groq/compound", "groq/compound-mini"]:
-                    if not policy_text:
-                        user_message = f"""Please use your web search capability to access and analyze the privacy policy at this URL: {url}
+                if has_web_search:
+                    user_message = f"""Please find and analyze the privacy policy for: {website_name}
+                    
+Website URL: {website_url}
 
-Search for and read the privacy policy, then provide your analysis in the required JSON format.
-
-URL to analyze: {url}"""
-                    else:
-                        user_message = f"Analyze this privacy policy:\n\n{truncated_text}"
+Use your web search capability to locate their privacy policy, read it, and provide a comprehensive analysis."""
                 else:
-                    user_message = f"Analyze this privacy policy:\n\n{truncated_text}"
-                
-                prompt_text = system_prompt
+                    user_message = f"Analyze the privacy practices of: {website_name} ({website_url})"
             
             key_rotation_count = 0
             invalid_response_retries = 0
@@ -391,7 +488,7 @@ URL to analyze: {url}"""
             
             while key_rotation_count < max_key_rotations:
                 try:
-                    logger.info(f"🤖 Attempt {attempt + 1}/{len(FALLBACK_MODELS)} - {model} ({provider})")
+                    logger.info(f"🤖 Attempt {attempt + 1}/{len(fallback_chain)} - {model} ({provider})")
                     start_time = time.time()
                     
                     messages = [
@@ -516,7 +613,7 @@ URL to analyze: {url}"""
             key_rotation_count = 0
             invalid_response_retries = 0
 
-        logger.error(f"💥 All {len(FALLBACK_MODELS)} models failed!")
+        logger.error(f"💥 All {len(fallback_chain)} models failed!")
         raise Exception(f"All LLM models failed. Last error: {str(last_error)}")
 
     def _validate_response(self, response: Dict[str, Any]) -> bool:
