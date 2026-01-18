@@ -1,0 +1,14 @@
+# Nixpacks configuration for Railway deployment
+# https://nixpacks.com/docs/configuration/file
+
+# Python version
+[phases.setup]
+nixPkgs = ["python311"]
+
+# Install only production dependencies
+[phases.install]
+cmds = ["pip install -r requirements-prod.txt"]
+
+# Set environment variables during build
+[variables]
+PYTHONUNBUFFERED = "1"

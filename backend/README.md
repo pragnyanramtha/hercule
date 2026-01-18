@@ -88,8 +88,82 @@ Health check endpoint.
 - **30-Day TTL**: Cached results expire after 30 days
 - **Text Truncation**: Policy text truncated to 50,000 characters before LLM analysis
 
+## Railway Deployment
+
+### Prerequisites
+
+1. Create an account at [railway.app](https://railway.app)
+2. Install the Railway CLI:
+   ```bash
+   npm install -g @railway/cli
+   ```
+3. Login to Railway:
+   ```bash
+   railway login
+   ```
+
+### Deploy from GitHub (Recommended)
+
+1. Push your code to GitHub
+2. Go to [railway.app/new](https://railway.app/new)
+3. Click **"Deploy from GitHub repo"**
+4. Select your repository
+5. Railway will auto-detect the `backend` directory
+6. Add environment variables in the Railway dashboard:
+   - `GROQ_API_KEY` - Your Groq API key
+   - `OPENROUTER_API_KEY` - Your OpenRouter API key (optional)
+   - `STORAGE_MODE` - Set to `local`
+   - `ALLOWED_ORIGINS` - Your frontend origins (or `*`)
+
+### Deploy with CLI
+
+```bash
+cd backend
+
+# Initialize Railway project
+railway init
+
+# Link to existing project (if needed)
+railway link
+
+# Add environment variables
+railway variables set GROQ_API_KEY=your_key_here
+railway variables set STORAGE_MODE=local
+railway variables set ALLOWED_ORIGINS="*"
+
+# Deploy
+railway up
+```
+
+### Environment Variables
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `GROQ_API_KEY` | Yes* | Groq API key for LLM analysis |
+| `OPENROUTER_API_KEY` | Yes* | OpenRouter API key (fallback) |
+| `STORAGE_MODE` | No | `local` (default) or `cosmos` |
+| `ALLOWED_ORIGINS` | No | CORS origins, default `*` |
+| `LOG_LEVEL` | No | `DEBUG`, `INFO`, `WARNING`, `ERROR` |
+
+*At least one LLM API key required
+
+### Verify Deployment
+
+After deployment, test your API:
+
+```bash
+# Health check
+curl https://your-app.up.railway.app/health
+
+# Test analysis
+curl -X POST https://your-app.up.railway.app/analyze \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://google.com"}'
+```
+
 ## Testing
 
 ```bash
 .venv\Scripts\python.exe -m pytest test_backend.py -v
 ```
+

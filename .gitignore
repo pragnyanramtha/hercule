@@ -51,5 +51,8 @@ backend/cache.json
 bin/
 obj/
 
+# Railway
+.railway/
+
 # Misc
 image.png

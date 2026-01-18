@@ -1,20 +1,27 @@
-# Core dependencies
-fastapi
-uvicorn
-groq
-python-dotenv
-pydantic
-httpx
-starlette
+# =============================================================================
+# Core Dependencies (Required for all deployments)
+# =============================================================================
+fastapi>=0.109.0
+uvicorn[standard]>=0.27.0
+groq>=0.4.0
+python-dotenv>=1.0.0
+pydantic>=2.5.0
+httpx>=0.26.0
+starlette>=0.35.0
 beautifulsoup4>=4.12.0
 requests>=2.31.0
 ddgs>=7.0.0
 
-# Testing (can be excluded in production)
-pytest
-pytest-cov
-pytest-asyncio
+# =============================================================================
+# Testing (for local development and CI)
+# =============================================================================
+pytest>=7.4.0
+pytest-cov>=4.1.0
+pytest-asyncio>=0.23.0
 
-# Azure deployment
-azure-functions>=1.17.0
-azure-cosmos>=4.5.0
+# =============================================================================
+# Azure Deployment (only needed for Azure Functions - NOT for Railway)
+# Uncomment if deploying to Azure
+# =============================================================================
+# azure-functions>=1.17.0
+# azure-cosmos>=4.5.0

@@ -11,9 +11,14 @@ const PHASES = [
         messages: [
             "Searching for privacy policy...",
             "Checking footer links...",
-            "Scanning navigation menu...",
-            "Testing URL concatenations...",
-            "Looking for legal documents..."
+            "Waking up the servers... ☕",
+            "Looking for legal documents...",
+            "Please wait, this may take a moment...",
+            "Swiping right on privacy policies... 💕",
+            "Teaching robots to read legalese...",
+            "Finding the fine print so you don't have to 🔍",
+            "On a first date with their privacy page...",
+            "Asking politely for their privacy terms..."
         ]
     },
     {
@@ -23,10 +28,16 @@ const PHASES = [
         bg: 'bg-emerald-500/20',
         messages: [
             "Found policy text!",
-            "Scraping content...",
             "Analyzing legal jargon...",
-            "Identifying data collection practices...",
-            "Checking for red flags..."
+            "High demand right now, hang tight! 🚀",
+            "Checking for red flags...",
+            "Our AI is reading the fine print...",
+            "Translating lawyer-speak to human... 🤖",
+            "Spotting the sneaky bits they hoped you'd miss...",
+            "Reading 50 pages so you can read 5 lines ✨",
+            "This policy is longer than my dating profile...",
+            "Dissecting corporate promises like a pro 🔬",
+            "Finding out if they really \"value your privacy\" 😏"
         ]
     },
     {
@@ -35,11 +46,17 @@ const PHASES = [
         color: 'text-purple-400',
         bg: 'bg-purple-500/20',
         messages: [
-            "Compiling results...",
             "Generating summary...",
-            "Formatting action items...",
+            "Thanks for your patience! 🙏",
             "Finalizing report...",
-            "Almost there..."
+            "Almost there, just a few more seconds...",
+            "Making your privacy easier to understand...",
+            "Wrapping up your privacy report with a bow 🎀",
+            "You're worth the wait, and so is this report 💜",
+            "Putting the finishing touches on your insights...",
+            "Your privacy guardian is almost ready! 🛡️",
+            "Preparing to blow your mind with clarity ✨",
+            "One sec, making this look pretty for you..."
         ]
     }
 ];

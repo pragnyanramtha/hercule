@@ -1,0 +1,22 @@
+# Railway deployment configuration for Hercule Backend API
+# https://docs.railway.app/reference/config-as-code
+
+[build]
+# Use Nixpacks (Railway's default builder) with Python
+builder = "NIXPACKS"
+
+[build.env]
+# Use production requirements (no test/Azure dependencies)
+NIXPACKS_PYTHON_REQUIREMENTS = "requirements-prod.txt"
+
+[deploy]
+# Start command for the FastAPI server
+startCommand = "uvicorn main:app --host 0.0.0.0 --port $PORT"
+
+# Health check configuration
+healthcheckPath = "/health"
+healthcheckTimeout = 30
+
+# Number of restart attempts before marking deployment as failed
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 3
