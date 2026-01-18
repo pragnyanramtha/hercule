@@ -5,6 +5,9 @@
  * - Production: defaults to Render deployment
  */
 
+// Helper to remove trailing slashes from URLs
+const normalizeUrl = (url: string) => url.replace(/\/+$/, '');
+
 export const config = {
   /**
    * Backend API URL
@@ -12,7 +15,7 @@ export const config = {
    * Production: https://hercule.onrender.com
    * Development: http://localhost:8000
    */
-  apiUrl: import.meta.env.VITE_API_URL || 'https://hercule.onrender.com',
+  apiUrl: normalizeUrl(import.meta.env.VITE_API_URL || 'https://hercule.onrender.com'),
 
   /**
    * Request timeout in milliseconds
