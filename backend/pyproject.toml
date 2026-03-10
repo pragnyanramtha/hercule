@@ -11,6 +11,7 @@ dependencies = [
     "ddgs>=7.0.0",
     "duckduckgo-search>=5.0.0",
     "fastapi>=0.128.0",
+    "google-generativeai==0.3.0",
     "groq>=1.0.0",
     "httpx>=0.28.1",
     "openai>=2.14.0",
@@ -21,5 +22,5 @@ dependencies = [
     "python-dotenv>=1.2.1",
     "requests>=2.31.0",
     "starlette>=0.50.0",
-    "uvicorn>=0.40.0",
+    "uvicorn[standard]>=0.40.0",
 ]
