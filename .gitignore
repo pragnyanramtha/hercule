@@ -14,7 +14,8 @@ build/
 # Environment variables and secrets
 backend/keys.json
 backend/local.settings.json
-# backend/.env
+backend/.env
+backend/.venv
 backend/local.settings.json
 .env
 *.env.local

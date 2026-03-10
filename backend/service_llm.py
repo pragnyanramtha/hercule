@@ -9,6 +9,7 @@ import time
 import httpx
 from typing import Dict, Any, Optional
 from urllib.parse import quote, urlparse
+import google.generativeai as genai
 from groq import Groq
 from models import AnalysisResult, ActionItem
 from datetime import datetime, timezone
@@ -18,30 +19,36 @@ logger = logging.getLogger("hercule-api.llm")
 
 # Context limits per model (in characters)
 MODEL_CONTEXT_LIMITS = {
-    "nvidia/nemotron-3-nano-30b-a3b:free": 1000000,  # Send full policy, let OpenRouter handle it
+    "gemini-3.1-flash-lite-preview": 1000000,
+    "gemini-3-flash-preview": 1000000,
+    "nvidia/nemotron-3-nano-30b-a3b:free": 1000000,
     "groq/compound": 70000,
     "llama-3.3-70b-versatile": 12000,
     "groq/compound-mini": 70000,
-    "moonshotai/kimi-k2-instruct-0905": 10000,  # No policy, just website
+    "moonshotai/kimi-k2-instruct-0905": 10000,
 }
 
 # Model order for fallback chain - WHEN POLICY TEXT IS AVAILABLE
 FALLBACK_MODELS_WITH_TEXT = [
+    ("gemini-3.1-flash-lite-preview", "gemini"),
+    ("gemini-3-flash-preview", "gemini"),
     ("nvidia/nemotron-3-nano-30b-a3b:free", "openrouter"),
     ("groq/compound", "groq"),
     ("llama-3.3-70b-versatile", "groq"),
     ("groq/compound-mini", "groq"),
-    ("moonshotai/kimi-k2-instruct-0905", "groq"),  # Last resort
+    ("moonshotai/kimi-k2-instruct-0905", "groq"),
 ]
 
 # Model order for fallback chain - WHEN NO POLICY TEXT (URL only)
 # Prioritizes models with web search capability
 FALLBACK_MODELS_URL_ONLY = [
+    ("gemini-3.1-flash-lite-preview", "gemini"),
+    ("gemini-3-flash-preview", "gemini"),
     ("groq/compound", "groq"),              # Best: has web search capability
     ("groq/compound-mini", "groq"),         # Also has web search
     ("moonshotai/kimi-k2-instruct-0905", "groq"),  # Knowledge-based fallback
-    ("nvidia/nemotron-3-nano-30b-a3b:free", "openrouter"),  # Try anyway
-    ("llama-3.3-70b-versatile", "groq"),    # Last resort
+    ("nvidia/nemotron-3-nano-30b-a3b:free", "openrouter"),
+    ("llama-3.3-70b-versatile", "groq"),
 ]
 
 # Backwards compatibility alias
@@ -56,16 +63,27 @@ class LLMService:
         """Initialize LLM client with API keys."""
         self.key_manager = api_key_manager
         self.openrouter_api_key = os.getenv("OPENROUTER_API_KEY")
+        self.gemini_api_key = os.getenv("GEMINI_API_KEY")
         
         # Check if we have any keys available
-        if self.key_manager.has_keys() or self.openrouter_api_key:
+        if self.key_manager.has_keys() or self.openrouter_api_key or self.gemini_api_key:
             self.test_mode = False
-            self.provider = "openrouter" if self.openrouter_api_key else "groq"
+            # Determine default provider
+            if self.gemini_api_key:
+                self.provider = "gemini"
+            elif self.openrouter_api_key:
+                self.provider = "openrouter"
+            else:
+                self.provider = "groq"
+                
             self.deployment = FALLBACK_MODELS[0][0]
             self.dev_mode = True
             logger.info("🚀 LLM Service initialized with fallback chain")
             logger.info(f"   Primary: {FALLBACK_MODELS[0][0]} ({FALLBACK_MODELS[0][1]})")
             logger.info(f"   Fallback models: {len(FALLBACK_MODELS) - 1}")
+            
+            if self.gemini_api_key:
+                logger.info(f"   Gemini key: ...{self.gemini_api_key[-6:]}")
             if self.openrouter_api_key:
                 logger.info(f"   OpenRouter key: ...{self.openrouter_api_key[-6:]}")
             if self.key_manager.has_keys():
@@ -124,6 +142,49 @@ class LLMService:
             
             response.raise_for_status()
             return response.json()
+
+    def _call_gemini(self, model: str, messages: list, user_api_key: Optional[str] = None) -> dict:
+        """Call Gemini API."""
+        api_key = user_api_key or self.gemini_api_key
+        if not api_key:
+            raise ValueError("Gemini API key not configured")
+        
+        genai.configure(api_key=api_key)
+        
+        # Convert messages to Gemini format
+        system_instruction = ""
+        gemini_messages = []
+        
+        for msg in messages:
+            if msg["role"] == "system":
+                system_instruction = msg["content"]
+            else:
+                gemini_messages.append({
+                    "role": "user" if msg["role"] == "user" else "model",
+                    "parts": [msg["content"]]
+                })
+        
+        # Gemini 1.5+ uses system_instruction
+        model_instance = genai.GenerativeModel(
+            model_name=model,
+            system_instruction=system_instruction
+        )
+        
+        response = model_instance.generate_content(
+            gemini_messages,
+            generation_config=genai.GenerationConfig(
+                temperature=0.3,
+                max_output_tokens=2000,
+                response_mime_type="application/json"
+            )
+        )
+        
+        try:
+            return json.loads(response.text)
+        except json.JSONDecodeError:
+            # Fallback for models that might not support JSON mode perfectly
+            # or if the response text contains extra bits
+            return self._extract_json_from_response(response.text)
 
     def _build_system_prompt(self, user_name: str = "") -> str:
         """Constructs the Privacy Lawyer Agent system prompt."""
@@ -403,7 +464,8 @@ Thank you,
         policy_text: str, 
         url: str, 
         user_name: str = "",
-        user_groq_api_key: str = ""
+        user_groq_api_key: str = "",
+        user_gemini_api_key: str = ""
     ) -> AnalysisResult:
         """
         Analyze policy with fallback chain across multiple models and providers.
@@ -496,10 +558,18 @@ Use your web search capability to locate their privacy policy, read it, and prov
                         {"role": "user", "content": user_message}
                     ]
                     
-                    if provider == "openrouter":
+                    if provider == "gemini":
+                        # Gemini API call
+                        result_dict = self._call_gemini(
+                            model, 
+                            messages, 
+                            user_api_key=user_gemini_api_key if attempt == 0 and key_rotation_count == 0 else None
+                        )
+                    elif provider == "openrouter":
                         # OpenRouter API call
                         response_data = self._call_openrouter(model, messages, context_limit)
                         content = response_data["choices"][0]["message"]["content"]
+                        result_dict = self._extract_json_from_response(content)
                     else:
                         # Groq API call
                         client = self._get_groq_client(user_groq_api_key if attempt == 0 and key_rotation_count == 0 else None)
@@ -513,12 +583,10 @@ Use your web search capability to locate their privacy policy, read it, and prov
                             response_format={"type": "json_object"}
                         )
                         content = response.choices[0].message.content
+                        result_dict = self._extract_json_from_response(content)
                     
                     api_duration = (time.time() - start_time) * 1000
                     logger.info(f"📡 API response from {model} in {api_duration:.0f}ms")
-                    
-                    # Try to extract and parse JSON from response
-                    result_dict = self._extract_json_from_response(content)
                     
                     if result_dict is None:
                         logger.warning(f"❌ Could not parse JSON from {model} response")
@@ -705,13 +773,17 @@ Use your web search capability to locate their privacy policy, read it, and prov
         provider: str, 
         messages: list, 
         context_limit: int,
-        user_groq_api_key: str = ""
+        user_groq_api_key: str = "",
+        user_gemini_api_key: str = ""
     ) -> Dict[str, Any]:
         """
         Make a single LLM request and return parsed JSON response.
         Raises exception on failure.
         """
         start_time = time.time()
+        
+        if provider == "gemini":
+            return self._call_gemini(model, messages, user_api_key=user_gemini_api_key)
         
         if provider == "openrouter":
             response_data = self._call_openrouter(model, messages, context_limit)

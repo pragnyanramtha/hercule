@@ -93,7 +93,8 @@ class AnalyzeRequest(BaseModel):
     policy_text: str = ""
     url: str = ""
     user_name: str = ""  # User's name for personalized emails
-    user_groq_api_key: str = ""  # User-provided API key
+    user_groq_api_key: str = ""  # User-provided Groq API key
+    user_gemini_api_key: str = ""  # User-provided Gemini API key
 
     @field_validator('policy_text')
     @classmethod
@@ -116,7 +117,7 @@ class AnalyzeRequest(BaseModel):
             return v.replace('\x00', '').strip()[:100]  # Limit name length
         return ""
     
-    @field_validator('user_groq_api_key')
+    @field_validator('user_groq_api_key', 'user_gemini_api_key')
     @classmethod
     def validate_api_key(cls, v: str) -> str:
         if v:
@@ -164,12 +165,15 @@ async def analyze_policy(request: AnalyzeRequest):
     policy_url = request.url
     user_name = request.user_name
     user_api_key = request.user_groq_api_key
+    user_gemini_key = request.user_gemini_api_key
     
     # Log user settings if provided
     if user_name:
         logger.info(f"👤 User name provided: {user_name}")
     if user_api_key:
-        logger.info(f"🔑 User API key provided (ending ...{user_api_key[-6:]})")
+        logger.info(f"🔑 User Groq API key provided (ending ...{user_api_key[-6:]})")
+    if user_gemini_key:
+        logger.info(f"💎 User Gemini API key provided (ending ...{user_gemini_key[-6:]})")
     
     # CACHE-FIRST: Check cache by URL and domain BEFORE any discovery
     if policy_url:
@@ -229,7 +233,8 @@ async def analyze_policy(request: AnalyzeRequest):
             result = llm_service.analyze_policy(
                 "", policy_url,
                 user_name=user_name,
-                user_groq_api_key=user_api_key
+                user_groq_api_key=user_api_key,
+                user_gemini_api_key=user_gemini_key
             )
             logger.info(f"✨ Analysis via LLM fallback complete - Score: {result.score}/100")
             
@@ -283,7 +288,8 @@ async def analyze_policy(request: AnalyzeRequest):
         result = llm_service.analyze_policy(
             policy_text, policy_url,
             user_name=user_name,
-            user_groq_api_key=user_api_key
+            user_groq_api_key=user_api_key,
+            user_gemini_api_key=user_gemini_key
         )
         duration_ms = (time.time() - start_time) * 1000
         logger.info(f"✨ Analysis complete - Score: {result.score}/100, Red flags: {len(result.red_flags)}, Duration: {duration_ms:.0f}ms")
