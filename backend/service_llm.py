@@ -20,17 +20,11 @@ logger = logging.getLogger("hercule-api.llm")
 # Context limits per model (in characters)
 MODEL_CONTEXT_LIMITS = {
     "gemini-3.1-flash-lite-preview": 1_000_000,
-    "gemini-3-flash-preview": 1_000_000,
-    "gemini-2.5-flash": 800_000,
-    "gemini-2.5-pro": 800_000,
 }
 
 # Gemini-only model fallback order
 FALLBACK_MODELS = [
     "gemini-3.1-flash-lite-preview",
-    "gemini-3-flash-preview",
-    "gemini-2.5-flash",
-    "gemini-2.5-pro",
 ]
 
 
