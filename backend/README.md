@@ -1,6 +1,6 @@
 # Hercule - Backend API
 
-FastAPI backend service for analyzing privacy policies using Groq LLM.
+FastAPI backend service for analyzing privacy policies using Gemini models.
 
 ## Setup
 
@@ -18,11 +18,12 @@ uv pip install -r requirements.txt
 Create a `.env` file in the `backend` directory:
 
 ```bash
-GROQ_API_KEY=your_groq_api_key_here
-GROQ_MODEL=llama-3.1-70b-versatile
+GEMINI_API_KEY=your_gemini_api_key_here
+STORAGE_MODE=local
+ALLOWED_ORIGINS=*
 ```
 
-Get your free API key at https://console.groq.com/
+Get your API key at https://aistudio.google.com/
 
 ### 3. Run the Server
 
@@ -38,44 +39,11 @@ Get your free API key at https://console.groq.com/
 
 ### POST /analyze
 
-Analyze a privacy policy. If only URL is provided, automatically discovers and extracts the privacy policy.
-
-**Request:**
-```json
-{
-  "policy_text": "",
-  "url": "https://example.com"
-}
-```
-
-**Response:**
-```json
-{
-  "score": 75,
-  "summary": "Plain-language summary of the policy...",
-  "red_flags": ["Concerning practice 1", "Concerning practice 2"],
-  "user_action_items": [
-    {"text": "Review your privacy settings", "url": "https://example.com/settings", "priority": "high"}
-  ],
-  "timestamp": "2025-12-27T10:30:00Z",
-  "url": "https://example.com/privacy"
-}
-```
+Analyze a privacy policy. If only URL is provided, backend tries discovery first and then Gemini URL-only analysis as fallback.
 
 ### GET /discover_policy
 
 Find the privacy policy URL for a website.
-
-**Request:** `GET /discover_policy?url=https://example.com`
-
-**Response:**
-```json
-{
-  "policy_url": "https://example.com/privacy",
-  "policy_text": "...",
-  "method": "parallel_paths"
-}
-```
 
 ### GET /health
 
@@ -83,87 +51,50 @@ Health check endpoint.
 
 ## Features
 
-- **Aggressive Policy Discovery**: Parallel path checking (25+ URLs), homepage scraping, DuckDuckGo search fallback
-- **Local JSON Caching**: Results cached using SHA-256 hash of policy text
-- **30-Day TTL**: Cached results expire after 30 days
-- **Text Truncation**: Policy text truncated to 50,000 characters before LLM analysis
+- Gemini-only model fallback chain
+- Aggressive policy discovery (parallel path checks, homepage scraping, search fallback)
+- Local JSON caching with 30-day TTL
+- Automatic action-item mailto link generation
 
 ## Railway Deployment
 
-### Prerequisites
+1. Deploy `backend` with Nixpacks.
+2. Set environment variables:
+   - `GEMINI_API_KEY` (required)
+   - `STORAGE_MODE` (`local` or `cosmos`)
+   - `ALLOWED_ORIGINS` (comma-separated)
+   - `LOG_LEVEL` (optional)
 
-1. Create an account at [railway.app](https://railway.app)
-2. Install the Railway CLI:
-   ```bash
-   npm install -g @railway/cli
-   ```
-3. Login to Railway:
-   ```bash
-   railway login
-   ```
+## Appwrite Deployment Prep
 
-### Deploy from GitHub (Recommended)
+This backend is now prepared to run as a standard ASGI web service on Appwrite using a containerized deployment flow.
 
-1. Push your code to GitHub
-2. Go to [railway.app/new](https://railway.app/new)
-3. Click **"Deploy from GitHub repo"**
-4. Select your repository
-5. Railway will auto-detect the `backend` directory
-6. Add environment variables in the Railway dashboard:
-   - `GROQ_API_KEY` - Your Groq API key
-   - `OPENROUTER_API_KEY` - Your OpenRouter API key (optional)
-   - `STORAGE_MODE` - Set to `local`
-   - `ALLOWED_ORIGINS` - Your frontend origins (or `*`)
+### Required Variables
 
-### Deploy with CLI
+- `GEMINI_API_KEY`
+- `STORAGE_MODE` (recommended `local` unless Cosmos is configured)
+- `ALLOWED_ORIGINS`
+- `LOG_LEVEL` (optional)
+
+### Start Command
+
+Use the same ASGI command:
 
 ```bash
-cd backend
-
-# Initialize Railway project
-railway init
-
-# Link to existing project (if needed)
-railway link
-
-# Add environment variables
-railway variables set GROQ_API_KEY=your_key_here
-railway variables set STORAGE_MODE=local
-railway variables set ALLOWED_ORIGINS="*"
-
-# Deploy
-railway up
+uvicorn main:app --host 0.0.0.0 --port $PORT
 ```
 
-### Environment Variables
+### Health Check Path
 
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `GROQ_API_KEY` | Yes* | Groq API key for LLM analysis |
-| `OPENROUTER_API_KEY` | Yes* | OpenRouter API key (fallback) |
-| `STORAGE_MODE` | No | `local` (default) or `cosmos` |
-| `ALLOWED_ORIGINS` | No | CORS origins, default `*` |
-| `LOG_LEVEL` | No | `DEBUG`, `INFO`, `WARNING`, `ERROR` |
+`/health`
 
-*At least one LLM API key required
+### Notes
 
-### Verify Deployment
-
-After deployment, test your API:
-
-```bash
-# Health check
-curl https://your-app.up.railway.app/health
-
-# Test analysis
-curl -X POST https://your-app.up.railway.app/analyze \
-  -H "Content-Type: application/json" \
-  -d '{"url": "https://google.com"}'
-```
+- The backend no longer relies on Groq or OpenRouter at runtime.
+- Azure-specific files still exist for teams that want to keep Azure Function compatibility, but model execution is Gemini-only.
 
 ## Testing
 
 ```bash
-.venv\Scripts\python.exe -m pytest test_backend.py -v
+.venv\Scripts\python.exe -m pytest tests -v
 ```
-

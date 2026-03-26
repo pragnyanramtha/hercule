@@ -1,9 +1,9 @@
 """
 Hercule API
-FastAPI backend for analyzing privacy policies using Groq LLM.
+FastAPI backend for analyzing privacy policies using Gemini models.
 """
 # CRITICAL: Load environment variables FIRST, before any local imports
-# This is because service_llm.py and api_key_manager.py read env vars at import time
+# This is because service_llm.py reads env vars at import time
 import os
 import json
 from pathlib import Path
@@ -20,7 +20,7 @@ if local_settings_path.exists():
             settings = json.load(f)
             values = settings.get("Values", {})
             for key, value in values.items():
-                if value and value not in ["YOUR_GROQ_API_KEY_HERE", "YOUR_OPENROUTER_API_KEY_HERE", "YOUR_COSMOS_CONNECTION_STRING_HERE"]:
+                if value and value not in ["YOUR_GEMINI_API_KEY_HERE", "YOUR_COSMOS_CONNECTION_STRING_HERE"]:
                     os.environ[key] = str(value)
     except Exception as e:
         print(f"Warning: Could not load local.settings.json: {e}")
@@ -93,7 +93,6 @@ class AnalyzeRequest(BaseModel):
     policy_text: str = ""
     url: str = ""
     user_name: str = ""  # User's name for personalized emails
-    user_groq_api_key: str = ""  # User-provided Groq API key
     user_gemini_api_key: str = ""  # User-provided Gemini API key
 
     @field_validator('policy_text')
@@ -117,7 +116,7 @@ class AnalyzeRequest(BaseModel):
             return v.replace('\x00', '').strip()[:100]  # Limit name length
         return ""
     
-    @field_validator('user_groq_api_key', 'user_gemini_api_key')
+    @field_validator('user_gemini_api_key')
     @classmethod
     def validate_api_key(cls, v: str) -> str:
         if v:
@@ -164,14 +163,11 @@ async def analyze_policy(request: AnalyzeRequest):
     policy_text = request.policy_text
     policy_url = request.url
     user_name = request.user_name
-    user_api_key = request.user_groq_api_key
     user_gemini_key = request.user_gemini_api_key
     
     # Log user settings if provided
     if user_name:
         logger.info(f"👤 User name provided: {user_name}")
-    if user_api_key:
-        logger.info(f"🔑 User Groq API key provided (ending ...{user_api_key[-6:]})")
     if user_gemini_key:
         logger.info(f"💎 User Gemini API key provided (ending ...{user_gemini_key[-6:]})")
     
@@ -213,15 +209,15 @@ async def analyze_policy(request: AnalyzeRequest):
             logger.info(f"✅ Discovery successful via {discovery_result.method}: {policy_url}")
             
         except (asyncio.TimeoutError, ValueError) as e:
-            # Discovery failed or timed out - use groq/compound with web search
+            # Discovery failed or timed out - use Gemini URL-only analysis
             if isinstance(e, asyncio.TimeoutError):
-                logger.warning(f"⏱️ Discovery timeout after 10s. Using groq/compound with web search...")
+                logger.warning("⏱️ Discovery timeout after 10s. Using Gemini URL-only analysis...")
             else:
-                logger.warning(f"❌ Discovery failed. Using groq/compound with web search...")
-            policy_text = None  # Let groq/compound fetch it via web search
+                logger.warning("❌ Discovery failed. Using Gemini URL-only analysis...")
+            policy_text = None
         except Exception as e:
-            # Unexpected error - use groq/compound with web search
-            logger.warning(f"❌ Discovery error: {e}. Using groq/compound with web search...")
+            # Unexpected error - use Gemini URL-only analysis
+            logger.warning(f"❌ Discovery error: {e}. Using Gemini URL-only analysis...")
             policy_text = None
     
     # If we still don't have policy text, use LLM fallback (will try all models in chain)
@@ -233,7 +229,6 @@ async def analyze_policy(request: AnalyzeRequest):
             result = llm_service.analyze_policy(
                 "", policy_url,
                 user_name=user_name,
-                user_groq_api_key=user_api_key,
                 user_gemini_api_key=user_gemini_key
             )
             logger.info(f"✨ Analysis via LLM fallback complete - Score: {result.score}/100")
@@ -288,7 +283,6 @@ async def analyze_policy(request: AnalyzeRequest):
         result = llm_service.analyze_policy(
             policy_text, policy_url,
             user_name=user_name,
-            user_groq_api_key=user_api_key,
             user_gemini_api_key=user_gemini_key
         )
         duration_ms = (time.time() - start_time) * 1000

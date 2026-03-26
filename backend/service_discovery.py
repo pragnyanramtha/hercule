@@ -260,9 +260,9 @@ class DiscoveryService:
                 result.policy_text = self._truncate_text(result.policy_text)
                 return result
 
-            # If site-specific search failed, we GIVE UP and let groq/compound handle it
+            # If site-specific search failed, we fall back to URL-only LLM analysis
             # We do NOT want to do broad searches (finds random ads) or return homepage content
-            logger.warning("❌ All discovery methods failed. Letting groq/compound handle it via web search.")
+            logger.warning("❌ All discovery methods failed. Falling back to URL-only LLM analysis.")
             return DiscoveryResult(
                 success=False,
                 error="Could not find privacy policy via standard methods",
