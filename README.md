@@ -78,7 +78,7 @@ uvicorn main:app --reload --port 8000
 **Terminal 2 - Extension Build:**
 ```bash
 cd frontend
-npm run dev
+npm run build
 ```
 
 ### 5. Load Extension in Chrome
